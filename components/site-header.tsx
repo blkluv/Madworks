@@ -13,7 +13,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
     else window.location.href = `/?view=${view}`
   }
   return (
-    <div className="sticky top-0 z-50 bg-black/85 backdrop-blur">
+    <div className="sticky top-0 z-50">
       <div className="container mx-auto px-4 py-4">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3">
@@ -39,7 +39,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                     <Folder className="w-4 h-4 mr-2" /> Projects
                   </Button>
                   <Button data-nav="gallery" onClick={() => goto("gallery")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'gallery' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
-                    <BookOpen className="w-4 h-4 mr-2" /> Gallery
+                    <BookOpen className="w-4 h-4 mr-2" /> Premium Templates
                   </Button>
                 </div>
               </div>

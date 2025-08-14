@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { HomeView } from "@/components/home-view"
 import { UploadInterface } from "@/components/upload-interface"
-import { GalleryView } from "@/components/gallery-view"
 import { PremiumTemplatesView } from "@/components/premium-templates-view"
 import { ProjectsView } from "@/components/projects-view"
 import { Button } from "@/components/ui/button"
@@ -65,8 +64,7 @@ export default function HomePage() {
           {currentView === "home" && <HomeView />}
           {currentView === "upload" && <UploadInterface />}
           {currentView === "projects" && <ProjectsView />}
-          {currentView === "gallery" && <GalleryView />}
-          {currentView === "premium" && <PremiumTemplatesView />}
+          {currentView === "gallery" && <PremiumTemplatesView />}
         </div>
       </div>
     </div>
