@@ -1,0 +1,84 @@
+"use client"
+
+import { Button } from "@/components/ui/button"
+import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle } from "lucide-react"
+import { useState } from "react"
+
+type ViewType = "home" | "upload" | "projects" | "gallery" | "premium"
+
+export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewType; onNavChange?: (v: ViewType) => void }) {
+  const [showAccountDropdown, setShowAccountDropdown] = useState(false)
+  const goto = (view: ViewType) => {
+    if (onNavChange) onNavChange(view)
+    else window.location.href = `/?view=${view}`
+  }
+  return (
+    <div className="sticky top-0 z-50 bg-black/85 backdrop-blur">
+      <div className="container mx-auto px-4 py-4">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-gradient-to-br from-indigo-600 via-pink-600 to-orange-500 rounded-xl shadow-lg shadow-indigo-600/25">
+              <div className="w-6 h-6 flex items-center justify-center">
+                <span className="text-white font-bold text-xl">M</span>
+              </div>
+            </div>
+            <h1 className="text-2xl font-bold text-white">Madworks AI</h1>
+          </div>
+
+          <div className="absolute left-1/2 transform -translate-x-1/2">
+            <nav className="flex justify-center">
+              <div className="bg-zinc-950/80 backdrop-blur rounded-full p-2 shadow border border-zinc-900">
+                <div className="flex items-center gap-2">
+                  <Button data-nav="home" onClick={() => goto("home")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'home' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
+                    <Home className="w-4 h-4 mr-2" /> Home
+                  </Button>
+                  <Button data-nav="upload" onClick={() => goto("upload")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'upload' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
+                    <ImageIcon className="w-4 h-4 mr-2" /> Upload
+                  </Button>
+                  <Button data-nav="projects" onClick={() => goto("projects")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'projects' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
+                    <Folder className="w-4 h-4 mr-2" /> Projects
+                  </Button>
+                  <Button data-nav="gallery" onClick={() => goto("gallery")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'gallery' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
+                    <BookOpen className="w-4 h-4 mr-2" /> Gallery
+                  </Button>
+                </div>
+              </div>
+            </nav>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button onClick={() => (window.location.href = "/upgrade")} className="h-10 px-4 rounded-full">
+              <Crown className="w-4 h-4 mr-2" /> Upgrade
+            </Button>
+            <div className="relative">
+              <Button
+                onClick={() => setShowAccountDropdown((s) => !s)}
+                className="h-12 w-12 bg-zinc-900 hover:bg-zinc-800 text-white rounded-full shadow border border-zinc-800 flex items-center justify-center"
+              >
+                <User className="w-4 h-4" />
+              </Button>
+              {showAccountDropdown && (
+                <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-56 bg-zinc-950/95 backdrop-blur rounded-xl shadow border border-zinc-800 py-1 px-1">
+                  <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
+                    <UserCircle className="w-4 h-4 mr-2" /> View Profile
+                  </Button>
+                  <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
+                    <User className="w-4 h-4 mr-2" /> Generative Preferences
+                  </Button>
+                  <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
+                    <HelpCircle className="w-4 h-4 mr-2" /> FAQ
+                  </Button>
+                  <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
+                    <Settings className="w-4 h-4 mr-2" /> Settings
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+

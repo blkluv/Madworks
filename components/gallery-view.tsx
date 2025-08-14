@@ -24,14 +24,15 @@ export function GalleryView() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       <div className="text-center">
-        <h1 className="text-4xl font-bold text-white mb-4">
-          My Gallery
-        </h1>
+        <div className="inline-flex items-center gap-3 mb-2">
+          <BookOpen className="w-8 h-8 text-zinc-200" />
+          <h1 className="text-4xl font-bold text-white">My Gallery</h1>
+        </div>
         <p className="text-gray-300 text-lg max-w-2xl mx-auto">Your processed images and generated ads.</p>
       </div>
 
       {/* Search and Filter Bar */}
-      <Card className="bg-slate-800/90 backdrop-blur-sm p-6 rounded-2xl shadow-lg">
+      <Card className="bg-zinc-950/90 backdrop-blur p-6 rounded-2xl shadow border border-zinc-900">
         <div className="flex flex-col md:flex-row gap-4 items-center">
           <div className="flex-1 relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
@@ -48,7 +49,7 @@ export function GalleryView() {
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="px-4 py-3 bg-slate-700/80 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all duration-300 rounded-2xl"
+              className="px-4 py-3 bg-zinc-900 text-white border border-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-700 rounded-2xl"
             >
               {categories.map((category) => (
                 <option key={category} value={category}>
@@ -84,7 +85,7 @@ export function GalleryView() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {item.variants?.map((v) => (
-                  <a key={`${v.format}-${v.w}x${v.h}`} href={v.url} download className="px-3 py-1 rounded-full bg-zinc-900 text-zinc-200 border border-zinc-800 text-xs">
+                  <a key={`${v.format}-${v.w}x${v.h}`} href={v.url} download className="px-3 py-1 rounded-full bg-zinc-900/60 backdrop-blur text-zinc-200 border border-zinc-800 text-xs hover:bg-zinc-900/80">
                     {v.format.toUpperCase()} {v.w}×{v.h}
                   </a>
                 ))}
@@ -99,7 +100,7 @@ export function GalleryView() {
           <div className="p-6 bg-zinc-900 rounded-3xl w-fit mx-auto mb-6 border border-zinc-800"><BookOpen className="w-16 h-16 text-white" /></div>
           <h3 className="text-2xl font-bold text-white mb-4">No Saved Templates Yet</h3>
           <p className="text-gray-300 leading-relaxed mb-6">Process images to see them here with multi-format downloads.</p>
-          <Button className="bg-white text-black rounded-2xl px-8 py-3 font-semibold shadow">Upload Now</Button>
+          <Button className="rounded-2xl px-8 py-3 font-semibold shadow">Upload Now</Button>
         </div>
       </div>
     </div>

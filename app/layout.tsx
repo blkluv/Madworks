@@ -3,6 +3,7 @@ import { GeistSans } from 'geist/font/sans'
 import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 import { AppProvider } from '@/components/app-context'
+import { CreditsPill } from '@/components/credits-pill'
 
 export const metadata: Metadata = {
   title: 'v0 App',
@@ -27,7 +28,10 @@ html {
         `}</style>
       </head>
       <body className="bg-black text-zinc-100">
-        <AppProvider>{children}</AppProvider>
+        <AppProvider>
+          {children}
+          <CreditsPill />
+        </AppProvider>
       </body>
     </html>
   )

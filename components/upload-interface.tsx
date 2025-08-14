@@ -1,11 +1,12 @@
 "use client"
 
 import type React from "react"
-import { useState, useCallback } from "react"
+import { useState, useCallback, useRef } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Upload, ImageIcon, Sparkles, Trash2, RefreshCw, TrendingUp, Eye, Zap } from "lucide-react"
+import { Upload, ImageIcon, Sparkles, Trash2, RefreshCw, TrendingUp, Eye, Zap, Send, PlusCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useApp } from "./app-context"
 
 interface UploadedFile {
   file: File
@@ -18,12 +19,14 @@ interface UploadedFile {
 }
 
 export function UploadInterface() {
+  const { decrementCredit, addToGallery, currentProject } = useApp()
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analyzingIndex, setAnalyzingIndex] = useState<number | null>(null)
   const [chatMessage, setChatMessage] = useState("")
   const [variationCount, setVariationCount] = useState(3)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -63,8 +66,12 @@ export function UploadInterface() {
     setIsAnalyzing(true)
     setAnalyzingIndex(index)
 
-    // Mock AI analysis with more realistic delay
-    await new Promise((resolve) => setTimeout(resolve, 3000))
+    // Send to backend pipeline (stub)
+    const form = new FormData()
+    form.append("file", uploadedFiles[index].file)
+    form.append("template_id", "story-bold-plate-v3")
+    const res = await fetch("http://localhost:3001/v1/jobs", { method: "POST", body: form as any }).catch(() => null)
+    await new Promise((resolve) => setTimeout(resolve, 1500))
 
     const mockAnalysis = {
       suggestions: [
@@ -85,6 +92,21 @@ export function UploadInterface() {
     }
 
     setUploadedFiles((prev) => prev.map((file, i) => (i === index ? { ...file, analysis: mockAnalysis } : file)))
+    // Add to gallery with variants stub
+    addToGallery({
+      id: `${Date.now()}-${index}`,
+      title: uploadedFiles[index].file.name,
+      thumbnail_url: uploadedFiles[index].preview,
+      createdAt: Date.now(),
+      variants: [
+        { format: "png", w: 1080, h: 1350, url: "/placeholder.svg" },
+        { format: "png", w: 1080, h: 1080, url: "/placeholder.svg" },
+        { format: "jpg", w: 1920, h: 1080, url: "/placeholder.svg" },
+        { format: "pdf", w: 2550, h: 3300, url: "/placeholder.svg" },
+        { format: "svg", w: 1080, h: 1080, url: "/placeholder.svg" },
+      ],
+    })
+    decrementCredit(1)
     setIsAnalyzing(false)
     setAnalyzingIndex(null)
   }
@@ -106,61 +128,71 @@ export function UploadInterface() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
-      <Card className="bg-slate-800/90 backdrop-blur-sm overflow-hidden relative shadow-2xl rounded-3xl">
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-800/80 via-indigo-900/40 to-indigo-900/60 opacity-90"></div>
+      <Card className="bg-zinc-950/90 backdrop-blur overflow-hidden relative shadow-2xl rounded-3xl border border-zinc-900">
         <div className="relative p-8">
           <div
             className={cn(
-              "relative p-16 border-3 border-dashed rounded-3xl transition-all duration-500 ease-out mx-4 my-4",
-              "bg-gradient-to-br from-slate-700/70 via-indigo-800/50 to-indigo-800/40 backdrop-blur-sm",
-              "shadow-inner border-spacing-4",
+              "relative p-16 border-2 border-dashed rounded-3xl transition-all duration-500 ease-out mx-4 my-4",
+              "bg-zinc-900 backdrop-blur",
+              "shadow-inner",
               isDragOver
-                ? "border-pink-400 bg-gradient-to-br from-indigo-700/80 via-pink-700/60 to-orange-600/70 scale-[1.01] shadow-2xl shadow-indigo-500/30 border-indigo-400"
-                : "border-indigo-400/60 hover:border-pink-400/80 hover:bg-gradient-to-br hover:from-indigo-700/50 hover:via-slate-700/60 hover:to-indigo-700/40 hover:shadow-xl",
+                ? "border-zinc-400 scale-[1.01] shadow-2xl"
+                : "border-zinc-800 hover:border-zinc-700 hover:shadow-xl",
             )}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
-            <div className="absolute inset-4 rounded-2xl bg-gradient-to-br from-slate-700/20 to-indigo-800/20 shadow-inner opacity-50"></div>
-
             <div className="text-center relative z-10 space-y-8">
               {/* Upload Icon and Title */}
               <div>
                 <div
                   className={cn(
-                    "mx-auto mb-6 p-6 rounded-3xl transition-all duration-500 shadow-2xl relative overflow-hidden w-fit",
-                    isDragOver
-                      ? "bg-gradient-to-br from-indigo-600 via-pink-600 to-orange-500 scale-110 shadow-indigo-500/50"
-                      : "bg-gradient-to-br from-slate-700 via-indigo-700 to-indigo-700 hover:scale-105 hover:shadow-xl",
+                    "mx-auto mb-6 p-6 rounded-3xl transition-all duration-500 shadow-2xl relative overflow-hidden w-fit bg-zinc-900 border border-zinc-800",
                   )}
                 >
-                  <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-indigo-400/20 opacity-60"></div>
-                  <Upload
-                    className={cn(
-                      "h-12 w-12 transition-all duration-500 relative z-10",
-                      isDragOver ? "text-white drop-shadow-lg" : "text-indigo-300",
-                    )}
-                  />
+                  <Upload className={cn("h-12 w-12 transition-all duration-500 relative z-10", "text-zinc-300")} />
                 </div>
 
-                <h3 className="text-2xl font-bold text-white mb-3 tracking-tight">Drop Your Ads Here</h3>
+                <h3 className="text-2xl font-bold text-white mb-3 tracking-tight">Drop your images here</h3>
                 <p className="text-gray-300 text-base mb-6 leading-relaxed font-medium max-w-lg mx-auto">
-                  Drag and drop your advertisement images to instantly receive AI-powered design analysis, performance
-                  insights, and actionable optimization recommendations.
+                  Upload assets, then describe what you want. We’ll generate on-brand ads across sizes and formats.
                 </p>
 
-                <div className="bg-gradient-to-r from-slate-700/80 via-indigo-800/60 to-slate-700/80 p-3 rounded-2xl backdrop-blur-sm mb-6 max-w-md mx-auto">
-                  <p className="text-indigo-300 text-sm font-medium">
-                    Supported formats: JPG, PNG, WebP • Max size: 10MB
-                  </p>
+                <div className="p-3 rounded-2xl bg-zinc-900 border border-zinc-800 mb-6 max-w-md mx-auto text-zinc-300 text-sm">
+                  Supported: JPG, PNG, WebP • Max 10MB
                 </div>
               </div>
 
               {/* File Input */}
-              <input type="file" className="hidden" onChange={handleFileSelect} accept="image/*" multiple />
+              <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileSelect} accept="image/*" multiple />
+          <Button onClick={() => fileInputRef.current?.click()} className="rounded-full">
+                <PlusCircle className="w-4 h-4 mr-2" /> Add images
+              </Button>
             </div>
           </div>
+        </div>
+      </Card>
+
+      {/* Chat-like instruction composer */}
+      <Card className="bg-zinc-950/90 backdrop-blur p-6 rounded-3xl border border-zinc-900">
+        <div className="flex flex-col md:flex-row gap-3 items-start md:items-center">
+          <div className="flex-1 w-full">
+            <textarea
+              value={chatMessage}
+              onChange={(e) => setChatMessage(e.target.value)}
+              placeholder="Describe what you want on the generated ads (e.g., upbeat headline, price $3.49, CTA Try it now)."
+              className="w-full min-h-16 p-4 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-200 placeholder-zinc-500"
+            />
+            <div className="text-xs text-zinc-400 mt-2">We never invent facts. Your text will be trimmed to fit templates.</div>
+          </div>
+          <Button
+            onClick={() => (uploadedFiles[0] ? analyzeAd(0) : fileInputRef.current?.click())}
+            disabled={!uploadedFiles[0] || isAnalyzing}
+            className="rounded-full px-6 py-3 whitespace-nowrap"
+          >
+            <Send className="w-4 h-4 mr-2" /> Generate ads
+          </Button>
         </div>
       </Card>
 
@@ -296,14 +328,7 @@ export function UploadInterface() {
                       <p className="text-gray-300 mb-6 max-w-sm mx-auto">
                         Our AI will analyze your design and provide actionable insights to improve performance.
                       </p>
-                      <Button
-                        onClick={() => analyzeAd(index)}
-                        disabled={isAnalyzing}
-                        className={cn(
-                          "bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 hover:from-indigo-700 hover:via-pink-700 hover:to-orange-600 text-white rounded-2xl px-8 py-3 font-semibold shadow-lg transition-all duration-300",
-                          isAnalyzing ? "opacity-50 cursor-not-allowed" : "hover:shadow-xl hover:scale-105",
-                        )}
-                      >
+                      <Button onClick={() => analyzeAd(index)} disabled={isAnalyzing} className={cn("rounded-2xl px-8 py-3 font-semibold shadow transition-all", isAnalyzing ? "opacity-50 cursor-not-allowed" : "hover:shadow-lg") }>
                         {analyzingIndex === index ? (
                           <>
                             <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-3"></div>
@@ -320,7 +345,7 @@ export function UploadInterface() {
                   ) : (
                     <div className="space-y-6">
                       {/* Score */}
-                      <div className="bg-gradient-to-r from-slate-700/90 to-indigo-800/90 p-6 rounded-2xl shadow-lg backdrop-blur-sm">
+                      <div className="bg-zinc-900 p-6 rounded-2xl shadow border border-zinc-800">
                         <div className="flex items-center justify-between mb-4">
                           <h4 className="text-white font-bold text-lg">Design Score</h4>
                           <div
@@ -359,7 +384,7 @@ export function UploadInterface() {
                       </div>
 
                       {/* Suggestions */}
-                      <div className="bg-gradient-to-r from-slate-700/90 to-indigo-800/90 p-6 rounded-2xl shadow-lg backdrop-blur-sm">
+                      <div className="bg-zinc-900 p-6 rounded-2xl shadow border border-zinc-800">
                         <h4 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
                           <div className="p-2 bg-blue-600 rounded-xl">
                             <Sparkles className="w-4 h-4 text-white" />
@@ -380,7 +405,7 @@ export function UploadInterface() {
                       </div>
 
                       {/* Improvements */}
-                      <div className="bg-gradient-to-r from-slate-700/90 to-indigo-800/90 p-6 rounded-2xl shadow-lg backdrop-blur-sm">
+                      <div className="bg-zinc-900 p-6 rounded-2xl shadow border border-zinc-800">
                         <h4 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
                           <div className="p-2 bg-emerald-600 rounded-xl">
                             <TrendingUp className="w-4 h-4 text-white" />
