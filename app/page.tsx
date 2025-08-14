@@ -7,11 +7,13 @@ import { GalleryView } from "@/components/gallery-view"
 import { PremiumTemplatesView } from "@/components/premium-templates-view"
 import { ProjectsView } from "@/components/projects-view"
 import { Button } from "@/components/ui/button"
+import { useApp } from "@/components/app-context"
 import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle } from "lucide-react"
 
 type ViewType = "home" | "upload" | "projects" | "gallery" | "premium"
 
 export default function HomePage() {
+  const { credits } = useApp()
   const [currentView, setCurrentView] = useState<ViewType>("home")
   const [showAccountDropdown, setShowAccountDropdown] = useState(false)
 
@@ -37,7 +39,12 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-900 to-blue-900 text-white relative overflow-x-hidden overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-indigo-600 hover:scrollbar-thumb-indigo-500">
+    <div className="min-h-screen bg-black text-zinc-100 relative overflow-x-hidden overflow-y-auto">
+      <div className="credits-pill">
+        <div className="px-4 py-2 rounded-full bg-zinc-900/90 border border-zinc-800 text-zinc-200 text-sm font-medium shadow-lg">
+          Credits: {credits}
+        </div>
+      </div>
       {/* Background decorations */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         {/* Subtle marble texture overlay */}
@@ -55,7 +62,7 @@ export default function HomePage() {
       </div>
 
       {/* Sticky Header */}
-      <div className="sticky top-0 z-50 bg-gradient-to-br from-slate-900/95 via-indigo-900/95 to-blue-900/95 backdrop-blur-sm border-b border-slate-700/50">
+      <div className="sticky top-0 z-50 bg-black/85 backdrop-blur border-b border-zinc-800">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center">
             {/* Logo and brand name */}
@@ -65,22 +72,20 @@ export default function HomePage() {
                   <span className="text-white font-bold text-xl">M</span>
                 </div>
               </div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-400 via-pink-400 to-orange-400 bg-clip-text text-transparent">
-                Madworks AI
-              </h1>
+              <h1 className="text-2xl font-bold text-white">Madworks AI</h1>
             </div>
 
             <div className="absolute left-1/2 transform -translate-x-1/2">
               {/* Navigation Pills */}
               <nav className="flex justify-center">
-                <div className="bg-slate-800/80 backdrop-blur-sm rounded-full p-2 shadow-2xl shadow-indigo-900/20">
+                <div className="bg-zinc-900/80 backdrop-blur rounded-full p-2 shadow-lg border border-zinc-800">
                   <div className="flex items-center gap-2">
                     <Button
                       onClick={() => handleViewChange("home")}
                       className={`rounded-full px-6 py-3 font-semibold transition-all duration-300 ${
                         currentView === "home"
-                          ? "bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 text-white shadow-lg shadow-indigo-600/30"
-                          : "bg-transparent text-gray-300 hover:bg-slate-700/50"
+                          ? "bg-white text-black"
+                          : "bg-transparent text-zinc-300 hover:bg-zinc-900"
                       }`}
                     >
                       <Home className="w-4 h-4 mr-2" />
@@ -90,8 +95,8 @@ export default function HomePage() {
                       onClick={() => handleViewChange("upload")}
                       className={`rounded-full px-6 py-3 font-semibold transition-all duration-300 ${
                         currentView === "upload"
-                          ? "bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 text-white shadow-lg shadow-indigo-600/30"
-                          : "bg-transparent text-gray-300 hover:bg-slate-700/50"
+                          ? "bg-white text-black"
+                          : "bg-transparent text-zinc-300 hover:bg-zinc-900"
                       }`}
                     >
                       <ImageIcon className="w-4 h-4 mr-2" />
@@ -101,8 +106,8 @@ export default function HomePage() {
                       onClick={() => handleViewChange("projects")}
                       className={`rounded-full px-6 py-3 font-semibold transition-all duration-300 ${
                         currentView === "projects"
-                          ? "bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 text-white shadow-lg shadow-indigo-600/30"
-                          : "bg-transparent text-gray-300 hover:bg-slate-700/50"
+                          ? "bg-white text-black"
+                          : "bg-transparent text-zinc-300 hover:bg-zinc-900"
                       }`}
                     >
                       <Folder className="w-4 h-4 mr-2" />
@@ -112,8 +117,8 @@ export default function HomePage() {
                       onClick={() => handleViewChange("gallery")}
                       className={`rounded-full px-6 py-3 font-semibold transition-all duration-300 ${
                         currentView === "gallery"
-                          ? "bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 text-white shadow-lg shadow-indigo-600/30"
-                          : "bg-transparent text-gray-300 hover:bg-slate-700/50"
+                          ? "bg-white text-black"
+                          : "bg-transparent text-zinc-300 hover:bg-zinc-900"
                       }`}
                     >
                       <BookOpen className="w-4 h-4 mr-2" />
@@ -139,7 +144,7 @@ export default function HomePage() {
             <div className="flex items-center gap-2">
               <Button
                 onClick={handleUpgradeClick}
-                className="h-12 px-4 bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-black font-semibold rounded-full shadow-lg shadow-yellow-500/25 transition-all duration-300 hover:scale-105"
+                className="h-12 px-4 bg-white text-black font-semibold rounded-full shadow-md hover:shadow-lg transition-all"
               >
                 <Crown className="w-4 h-4 mr-2" />
                 Upgrade
@@ -151,32 +156,32 @@ export default function HomePage() {
                     closeAllDropdowns()
                     setShowAccountDropdown(!showAccountDropdown)
                   }}
-                  className="h-12 w-12 bg-slate-800/80 backdrop-blur-sm hover:bg-slate-700/80 text-white rounded-full shadow-lg shadow-slate-900/25 transition-all duration-300 hover:scale-105 border border-slate-600/30 flex items-center justify-center"
+                  className="h-12 w-12 bg-zinc-900 hover:bg-zinc-800 text-white rounded-full shadow border border-zinc-800 flex items-center justify-center"
                 >
                   <User className="w-4 h-4" />
                 </Button>
 
                 {showAccountDropdown && (
-                  <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 w-56 bg-slate-800/95 backdrop-blur-sm rounded-xl shadow-2xl shadow-indigo-900/20 border border-slate-700/50 py-1 px-1">
-                    <Button className="w-full text-left px-3 py-2 text-gray-300 hover:bg-slate-700/50 bg-transparent rounded-lg transition-colors duration-200 justify-start">
+                  <div className="absolute top-full mt-2 left-1/2 transform -translate-x-1/2 w-56 bg-zinc-950/95 backdrop-blur rounded-xl shadow border border-zinc-800 py-1 px-1">
+                    <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
                       <UserCircle className="w-4 h-4 mr-2" />
                       View Profile
                     </Button>
-                    <Button className="w-full text-left px-3 py-2 text-gray-300 hover:bg-slate-700/50 bg-transparent rounded-lg transition-colors duration-200 justify-start">
+                    <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
                       <User className="w-4 h-4 mr-2" />
                       Generative Preferences
                     </Button>
-                    <Button className="w-full text-left px-3 py-2 text-gray-300 hover:bg-slate-700/50 bg-transparent rounded-lg transition-colors duration-200 justify-start">
+                    <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
                       <HelpCircle className="w-4 h-4 mr-2" />
                       FAQ
                     </Button>
-                    <Button className="w-full text-left px-3 py-2 text-gray-300 hover:bg-slate-700/50 bg-transparent rounded-lg transition-colors duration-200 justify-start">
+                    <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
                       <Settings className="w-4 h-4 mr-2" />
                       Settings
                     </Button>
                     <Button
                       onClick={handleUpgradeClick}
-                      className="w-full text-left px-3 py-2 text-yellow-400 hover:bg-slate-700/50 bg-transparent rounded-lg transition-colors duration-200 justify-start"
+                      className="w-full text-left px-3 py-2 text-white bg-black/40 hover:bg-black/60 rounded-lg justify-start"
                     >
                       <Crown className="w-4 h-4 mr-2" />
                       Upgrade

@@ -8,15 +8,15 @@ export function HomeView() {
   return (
     <div className="max-w-6xl mx-auto space-y-12">
       {/* Hero Section */}
-      <Card className="bg-slate-800/90 backdrop-blur-sm overflow-hidden relative shadow-2xl rounded-3xl">
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-800/80 via-indigo-900/40 to-indigo-900/60 opacity-90"></div>
+      <Card className="bg-zinc-950/90 backdrop-blur overflow-hidden relative shadow-2xl rounded-3xl border border-zinc-900">
         <div className="relative p-12 text-center">
-          <div className="mx-auto mb-8 p-6 rounded-3xl bg-gradient-to-br from-slate-700 via-indigo-700 to-indigo-700 w-fit shadow-2xl">
-            <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-indigo-400/20 opacity-60 rounded-3xl"></div>
-            <Sparkles className="h-16 w-16 text-indigo-300 relative z-10" />
+          <div className="mx-auto mb-8 p-6 rounded-3xl bg-zinc-900 w-fit shadow-2xl border border-zinc-800">
+            <Sparkles className="h-16 w-16 text-zinc-300 relative z-10" />
           </div>
 
-          <h1 className="text-4xl font-bold text-white mb-6 tracking-tight">Transform Your Ads with AI</h1>
+          <h1 className="text-4xl font-bold text-white mb-6 tracking-tight">
+            <span className="chromatic-text">Transform</span> Your Ads with AI
+          </h1>
           <p className="text-gray-300 text-xl mb-8 leading-relaxed font-medium max-w-3xl mx-auto">
             Upload your marketing advertisements and get instant AI-powered design analysis, performance insights, and
             actionable optimization recommendations to boost your campaign success.
@@ -107,7 +107,7 @@ export function HomeView() {
       </div>
 
       {/* Pricing Plans */}
-      <div className="space-y-8">
+      <div id="pricing-section" className="space-y-8">
         <div className="text-center">
           <h2 className="text-3xl font-bold text-white mb-4">Choose Your Plan</h2>
           <p className="text-gray-300 text-lg max-w-2xl mx-auto">
@@ -117,7 +117,7 @@ export function HomeView() {
 
         <div className="grid md:grid-cols-3 gap-8">
           {/* Free Plan */}
-          <Card className="bg-slate-800/90 backdrop-blur-sm p-8 rounded-2xl shadow-lg relative">
+          <Card className="bg-zinc-950/90 backdrop-blur p-8 rounded-2xl shadow-lg relative border border-zinc-900">
             <div className="text-center mb-6">
               <h3 className="text-xl font-bold text-white mb-2">Free</h3>
               <div className="text-3xl font-bold text-white mb-1">$0</div>
@@ -145,7 +145,7 @@ export function HomeView() {
           </Card>
 
           {/* Pro Plan */}
-          <Card className="bg-gradient-to-br from-indigo-900/50 to-pink-900/50 backdrop-blur-sm p-8 rounded-2xl shadow-2xl relative border border-indigo-500/30">
+          <Card className="bg-zinc-900 p-8 rounded-2xl shadow-2xl relative border border-zinc-800">
             <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
               <div className="bg-gradient-to-r from-indigo-600 to-pink-600 text-white px-4 py-1 rounded-full text-sm font-bold">
                 Most Popular
@@ -177,13 +177,13 @@ export function HomeView() {
               </li>
             </ul>
 
-            <Button className="w-full bg-gradient-to-r from-indigo-600 to-pink-600 hover:from-indigo-700 hover:to-pink-700 text-white rounded-2xl py-3 font-semibold shadow-lg">
+            <Button className="w-full bg-white text-black hover:bg-zinc-200 rounded-2xl py-3 font-semibold shadow">
               Upgrade to Pro
             </Button>
           </Card>
 
           {/* Enterprise Plan */}
-          <Card className="bg-slate-800/90 backdrop-blur-sm p-8 rounded-2xl shadow-lg relative">
+          <Card className="bg-zinc-950/90 backdrop-blur p-8 rounded-2xl shadow-lg relative border border-zinc-900">
             <div className="text-center mb-6">
               <h3 className="text-xl font-bold text-white mb-2 flex items-center justify-center gap-2">
                 <Crown className="w-5 h-5 text-yellow-400" />
@@ -212,7 +212,7 @@ export function HomeView() {
               </li>
             </ul>
 
-            <Button className="w-full bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700 text-white rounded-2xl py-3 font-semibold shadow-lg">
+            <Button className="w-full bg-white text-black hover:bg-zinc-200 rounded-2xl py-3 font-semibold shadow">
               Contact Sales
             </Button>
           </Card>
