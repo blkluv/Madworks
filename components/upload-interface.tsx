@@ -1,0 +1,427 @@
+"use client"
+
+import type React from "react"
+import { useState, useCallback } from "react"
+import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Upload, ImageIcon, Sparkles, Trash2, RefreshCw, TrendingUp, Eye, Zap } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+interface UploadedFile {
+  file: File
+  preview: string
+  analysis?: {
+    suggestions: string[]
+    score: number
+    improvements: string[]
+  }
+}
+
+export function UploadInterface() {
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
+  const [isDragOver, setIsDragOver] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analyzingIndex, setAnalyzingIndex] = useState<number | null>(null)
+  const [chatMessage, setChatMessage] = useState("")
+  const [variationCount, setVariationCount] = useState(3)
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+
+    const files = Array.from(e.dataTransfer.files).filter((file) => file.type.startsWith("image/"))
+    processFiles(files)
+  }, [])
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    processFiles(files)
+  }, [])
+
+  const processFiles = (files: File[]) => {
+    files.forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const preview = e.target?.result as string
+        setUploadedFiles((prev) => [...prev, { file, preview }])
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const analyzeAd = async (index: number) => {
+    setIsAnalyzing(true)
+    setAnalyzingIndex(index)
+
+    // Mock AI analysis with more realistic delay
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+
+    const mockAnalysis = {
+      suggestions: [
+        "Consider using a stronger call-to-action button with contrasting colors",
+        "The text hierarchy could be improved with better font sizing",
+        "Try positioning the main element higher in the composition for better visibility",
+        "The color palette could be more vibrant to increase engagement rates",
+        "Add more whitespace around key elements to improve readability",
+      ],
+      score: Math.floor(Math.random() * 25) + 75,
+      improvements: [
+        "Increase CTA button size by 25% for better mobile visibility",
+        "Use complementary colors to create stronger visual hierarchy",
+        "Implement the rule of thirds for better composition balance",
+        "A/B test different headline variations for higher conversion",
+        "Add subtle shadows to make elements pop from the background",
+      ],
+    }
+
+    setUploadedFiles((prev) => prev.map((file, i) => (i === index ? { ...file, analysis: mockAnalysis } : file)))
+    setIsAnalyzing(false)
+    setAnalyzingIndex(null)
+  }
+
+  const removeFile = (index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const reanalyze = (index: number) => {
+    setUploadedFiles((prev) => prev.map((file, i) => (i === index ? { ...file, analysis: undefined } : file)))
+  }
+
+  const handleChatSubmit = () => {
+    if (chatMessage.trim()) {
+      console.log("Chat message:", chatMessage, "Variations:", variationCount)
+      setChatMessage("")
+    }
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-8">
+      <Card className="bg-slate-800/90 backdrop-blur-sm overflow-hidden relative shadow-2xl rounded-3xl">
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-800/80 via-indigo-900/40 to-indigo-900/60 opacity-90"></div>
+        <div className="relative p-8">
+          <div
+            className={cn(
+              "relative p-16 border-3 border-dashed rounded-3xl transition-all duration-500 ease-out mx-4 my-4",
+              "bg-gradient-to-br from-slate-700/70 via-indigo-800/50 to-indigo-800/40 backdrop-blur-sm",
+              "shadow-inner border-spacing-4",
+              isDragOver
+                ? "border-pink-400 bg-gradient-to-br from-indigo-700/80 via-pink-700/60 to-orange-600/70 scale-[1.01] shadow-2xl shadow-indigo-500/30 border-indigo-400"
+                : "border-indigo-400/60 hover:border-pink-400/80 hover:bg-gradient-to-br hover:from-indigo-700/50 hover:via-slate-700/60 hover:to-indigo-700/40 hover:shadow-xl",
+            )}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <div className="absolute inset-4 rounded-2xl bg-gradient-to-br from-slate-700/20 to-indigo-800/20 shadow-inner opacity-50"></div>
+
+            <div className="text-center relative z-10 space-y-8">
+              {/* Upload Icon and Title */}
+              <div>
+                <div
+                  className={cn(
+                    "mx-auto mb-6 p-6 rounded-3xl transition-all duration-500 shadow-2xl relative overflow-hidden w-fit",
+                    isDragOver
+                      ? "bg-gradient-to-br from-indigo-600 via-pink-600 to-orange-500 scale-110 shadow-indigo-500/50"
+                      : "bg-gradient-to-br from-slate-700 via-indigo-700 to-indigo-700 hover:scale-105 hover:shadow-xl",
+                  )}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-indigo-400/20 opacity-60"></div>
+                  <Upload
+                    className={cn(
+                      "h-12 w-12 transition-all duration-500 relative z-10",
+                      isDragOver ? "text-white drop-shadow-lg" : "text-indigo-300",
+                    )}
+                  />
+                </div>
+
+                <h3 className="text-2xl font-bold text-white mb-3 tracking-tight">Drop Your Ads Here</h3>
+                <p className="text-gray-300 text-base mb-6 leading-relaxed font-medium max-w-lg mx-auto">
+                  Drag and drop your advertisement images to instantly receive AI-powered design analysis, performance
+                  insights, and actionable optimization recommendations.
+                </p>
+
+                <div className="bg-gradient-to-r from-slate-700/80 via-indigo-800/60 to-slate-700/80 p-3 rounded-2xl backdrop-blur-sm mb-6 max-w-md mx-auto">
+                  <p className="text-indigo-300 text-sm font-medium">
+                    Supported formats: JPG, PNG, WebP • Max size: 10MB
+                  </p>
+                </div>
+              </div>
+
+              {/* File Input */}
+              <input type="file" className="hidden" onChange={handleFileSelect} accept="image/*" multiple />
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {uploadedFiles.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card className="bg-slate-700/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-sm">
+                <Eye className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="text-gray-400 text-sm font-medium">Total Uploads</p>
+                <p className="text-white text-xl font-bold">{uploadedFiles.length}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="bg-slate-700/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-2xl shadow-sm">
+                <TrendingUp className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="text-gray-400 text-sm font-medium">Analyzed</p>
+                <p className="text-white text-xl font-bold">{uploadedFiles.filter((f) => f.analysis).length}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="bg-slate-700/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-gradient-to-br from-indigo-500 to-pink-500 rounded-2xl shadow-sm">
+                <Zap className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <p className="text-gray-400 text-sm font-medium">Avg Score</p>
+                <p className="text-white text-xl font-bold">
+                  {uploadedFiles.filter((f) => f.analysis).length > 0
+                    ? Math.round(
+                        uploadedFiles.filter((f) => f.analysis).reduce((acc, f) => acc + (f.analysis?.score || 0), 0) /
+                          uploadedFiles.filter((f) => f.analysis).length,
+                      )
+                    : 0}
+                </p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {uploadedFiles.length > 0 && (
+        <div className="grid gap-8">
+          {uploadedFiles.map((uploadedFile, index) => (
+            <Card
+              key={index}
+              className="bg-slate-800/90 backdrop-blur-sm p-8 hover:bg-slate-700/90 transition-all duration-500 hover:shadow-2xl hover:shadow-indigo-500/15 rounded-3xl overflow-hidden relative"
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-800/30 via-indigo-900/20 to-indigo-900/30 opacity-60"></div>
+
+              <div className="grid lg:grid-cols-2 gap-8 relative z-10">
+                {/* Image Preview */}
+                <div className="space-y-6">
+                  <div className="relative group">
+                    <div className="p-4 bg-gradient-to-br from-slate-700 via-indigo-800 to-indigo-800 rounded-3xl shadow-2xl">
+                      <div className="p-2 bg-gradient-to-br from-slate-600 to-indigo-700 rounded-2xl shadow-inner">
+                        <img
+                          src={uploadedFile.preview || "/placeholder.svg"}
+                          alt={`Gallery piece ${index + 1}`}
+                          className="w-full h-80 object-cover rounded-xl shadow-lg transition-all duration-500 group-hover:scale-[1.02] group-hover:shadow-2xl"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="absolute top-6 right-6 flex gap-3">
+                      <Button
+                        onClick={() => removeFile(index)}
+                        size="sm"
+                        variant="destructive"
+                        className="bg-slate-700/90 hover:bg-red-600/90 text-red-400 hover:text-white rounded-2xl backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                      {uploadedFile.analysis && (
+                        <Button
+                          onClick={() => reanalyze(index)}
+                          size="sm"
+                          className="bg-slate-700/90 hover:bg-indigo-600/90 text-indigo-400 hover:text-white rounded-2xl backdrop-blur-sm shadow-lg hover:shadow-xl transition-all duration-300"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-gradient-to-r from-slate-700/80 via-indigo-800/60 to-slate-700/80 p-6 rounded-2xl shadow-lg backdrop-blur-sm">
+                    <div className="grid grid-cols-2 gap-6 text-sm">
+                      <div>
+                        <p className="text-indigo-300 mb-2 font-semibold uppercase tracking-wide text-xs">
+                          Artwork Title
+                        </p>
+                        <p className="text-white font-bold truncate text-base">{uploadedFile.file.name}</p>
+                      </div>
+                      <div>
+                        <p className="text-indigo-300 mb-2 font-semibold uppercase tracking-wide text-xs">File Size</p>
+                        <p className="text-white font-bold text-base">
+                          {(uploadedFile.file.size / 1024 / 1024).toFixed(2)} MB
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Analysis Section */}
+                <div className="space-y-6">
+                  {!uploadedFile.analysis ? (
+                    <div className="text-center py-12">
+                      <div className="mb-6">
+                        <div
+                          className={cn(
+                            "mx-auto p-4 rounded-2xl transition-all duration-300 shadow-lg w-fit",
+                            analyzingIndex === index
+                              ? "bg-gradient-to-br from-indigo-600 via-pink-600 to-orange-500 animate-pulse"
+                              : "bg-gradient-to-br from-slate-700 to-indigo-700",
+                          )}
+                        >
+                          <Sparkles
+                            className={cn(
+                              "h-10 w-10 transition-colors duration-300",
+                              analyzingIndex === index ? "text-white" : "text-indigo-300",
+                            )}
+                          />
+                        </div>
+                      </div>
+                      <h4 className="text-xl font-bold text-white mb-3">Ready for AI Analysis</h4>
+                      <p className="text-gray-300 mb-6 max-w-sm mx-auto">
+                        Our AI will analyze your design and provide actionable insights to improve performance.
+                      </p>
+                      <Button
+                        onClick={() => analyzeAd(index)}
+                        disabled={isAnalyzing}
+                        className={cn(
+                          "bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 hover:from-indigo-700 hover:via-pink-700 hover:to-orange-600 text-white rounded-2xl px-8 py-3 font-semibold shadow-lg transition-all duration-300",
+                          isAnalyzing ? "opacity-50 cursor-not-allowed" : "hover:shadow-xl hover:scale-105",
+                        )}
+                      >
+                        {analyzingIndex === index ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-3"></div>
+                            Analyzing Design...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-5 h-5 mr-3" />
+                            Analyze Design
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-6">
+                      {/* Score */}
+                      <div className="bg-gradient-to-r from-slate-700/90 to-indigo-800/90 p-6 rounded-2xl shadow-lg backdrop-blur-sm">
+                        <div className="flex items-center justify-between mb-4">
+                          <h4 className="text-white font-bold text-lg">Design Score</h4>
+                          <div
+                            className={cn(
+                              "px-4 py-2 rounded-2xl text-sm font-bold shadow-sm",
+                              uploadedFile.analysis.score >= 90
+                                ? "bg-emerald-600 text-white"
+                                : uploadedFile.analysis.score >= 75
+                                  ? "bg-blue-600 text-white"
+                                  : "bg-indigo-600 text-white",
+                            )}
+                          >
+                            {uploadedFile.analysis.score >= 90
+                              ? "Excellent"
+                              : uploadedFile.analysis.score >= 75
+                                ? "Good"
+                                : "Needs Work"}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="flex-1 bg-slate-600 rounded-full h-3 overflow-hidden">
+                            <div
+                              className={cn(
+                                "h-3 rounded-full transition-all duration-1000 ease-out",
+                                uploadedFile.analysis.score >= 90
+                                  ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
+                                  : uploadedFile.analysis.score >= 75
+                                    ? "bg-gradient-to-r from-blue-500 to-blue-400"
+                                    : "bg-gradient-to-r from-indigo-500 to-pink-500",
+                              )}
+                              style={{ width: `${uploadedFile.analysis.score}%` }}
+                            />
+                          </div>
+                          <span className="text-white font-bold text-xl">{uploadedFile.analysis.score}/100</span>
+                        </div>
+                      </div>
+
+                      {/* Suggestions */}
+                      <div className="bg-gradient-to-r from-slate-700/90 to-indigo-800/90 p-6 rounded-2xl shadow-lg backdrop-blur-sm">
+                        <h4 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
+                          <div className="p-2 bg-blue-600 rounded-xl">
+                            <Sparkles className="w-4 h-4 text-white" />
+                          </div>
+                          AI Suggestions
+                        </h4>
+                        <ul className="space-y-3">
+                          {uploadedFile.analysis.suggestions.map((suggestion, i) => (
+                            <li
+                              key={i}
+                              className="text-gray-300 flex items-start gap-3 p-4 bg-slate-600/50 rounded-2xl hover:bg-slate-600/70 transition-colors duration-200"
+                            >
+                              <span className="text-indigo-400 mt-1 font-bold">•</span>
+                              <span className="leading-relaxed">{suggestion}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Improvements */}
+                      <div className="bg-gradient-to-r from-slate-700/90 to-indigo-800/90 p-6 rounded-2xl shadow-lg backdrop-blur-sm">
+                        <h4 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
+                          <div className="p-2 bg-emerald-600 rounded-xl">
+                            <TrendingUp className="w-4 h-4 text-white" />
+                          </div>
+                          Recommended Improvements
+                        </h4>
+                        <ul className="space-y-3">
+                          {uploadedFile.analysis.improvements.map((improvement, i) => (
+                            <li
+                              key={i}
+                              className="text-gray-300 flex items-start gap-3 p-4 bg-slate-600/50 rounded-2xl hover:bg-slate-600/70 transition-colors duration-200"
+                            >
+                              <span className="text-emerald-400 mt-1 font-bold">✓</span>
+                              <span className="leading-relaxed">{improvement}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {uploadedFiles.length === 0 && (
+        <Card className="bg-slate-800/80 backdrop-blur-sm p-12 text-center rounded-2xl shadow-lg">
+          <div className="max-w-md mx-auto">
+            <div className="p-6 bg-gradient-to-br from-slate-700 to-indigo-700 rounded-2xl w-fit mx-auto mb-6 shadow-lg">
+              <ImageIcon className="w-12 h-12 text-indigo-300" />
+            </div>
+            <h3 className="text-xl font-bold text-white mb-3">No ads uploaded yet</h3>
+            <p className="text-gray-300 leading-relaxed">
+              Upload your first marketing advertisement to get started with AI-powered design analysis and optimization
+              suggestions.
+            </p>
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
