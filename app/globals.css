@@ -122,3 +122,9 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Overrides to enforce black dark theme and utility classes */
+html, body { background: #000 !important; }
+.credits-pill{position:fixed;top:14px;right:16px;z-index:60}
+.chromatic-text{background:linear-gradient(90deg,#ff00cc,#3333ff,#00e5ff,#00ff85,#ffd400,#ff00cc);background-size:200% 200%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:chroma 8s ease infinite}
+@keyframes chroma{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
