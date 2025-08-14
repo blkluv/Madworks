@@ -1,0 +1,38 @@
+{
+  "name": "madworks-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts src/db/migrate.ts --format esm --dts --out-dir dist",
+    "start": "node dist/index.js",
+    "migrate": "node dist/db/migrate.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.1",
+    "@fastify/multipart": "^9.0.1",
+    "@fastify/sensible": "^6.0.1",
+    "@fastify/swagger": "^9.4.2",
+    "@fastify/swagger-ui": "^3.0.1",
+    "@fastify/static": "^7.0.0",
+    "bullmq": "^5.23.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "ioredis": "^5.4.1",
+    "pg": "^8.11.5",
+    "pino": "^9.3.2",
+    "s3rver": "^3.7.1",
+    "zod": "^3.23.8",
+    "aws-sdk": "^2.1620.0",
+    "undici": "^6.19.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.8",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.4"
+  }
+}
+
+
