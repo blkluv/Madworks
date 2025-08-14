@@ -2,9 +2,16 @@ import 'dotenv/config';
 import { Worker, QueueEvents, Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { Pool } from 'pg';
-import { request } from 'undici';
+import { request, fetch } from 'undici';
+import FormData from 'form-data';
+import fs from 'fs';
+import path from 'path';
 
-const redis = new IORedis(Number(process.env.REDIS_PORT || 6379), process.env.REDIS_HOST || '127.0.0.1');
+const redis = new IORedis({
+  port: Number(process.env.REDIS_PORT || 6379),
+  host: process.env.REDIS_HOST || '127.0.0.1',
+  maxRetriesPerRequest: null, // Fix for BullMQ v4+
+});
 const queueName = 'jobs';
 const queueEvents = new QueueEvents(queueName, { connection: redis as any });
 
@@ -26,6 +33,17 @@ async function saveOutputs(jobId: string, outputs: any[]) {
   await pg.query('update jobs set outputs=$2, updated_at=now() where id=$1', [jobId, JSON.stringify(outputs)]);
 }
 
+async function downloadImage(url: string, dest: string) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to download image: ${url}`);
+  const fileStream = fs.createWriteStream(dest);
+  await new Promise((resolve, reject) => {
+    res.body.pipe(fileStream);
+    res.body.on('error', reject);
+    fileStream.on('finish', resolve);
+  });
+}
+
 const worker = new Worker(
   queueName,
   async (job: Job) => {
@@ -33,28 +51,86 @@ const worker = new Worker(
     const { rows } = await pg.query('select * from jobs where id=$1', [jobId]);
     const record = rows[0];
     if (!record) return;
+    let tempImagePath = '';
     try {
       await updateStatus(jobId, 'analyzing');
-      await request(`${pyBase}/ingest-analyze`, { method: 'POST', body: JSON.stringify({ image_url: record.input_image_url }), headers: { 'content-type': 'application/json' } });
+      // Download image from MinIO (presigned URL)
+      tempImagePath = path.join('/tmp', `${jobId}_input`);
+      await downloadImage(record.input_image_url, tempImagePath);
+      // Send image as file to /ingest-analyze
+      const form = new FormData();
+      form.append('image', fs.createReadStream(tempImagePath), { filename: 'input.png' });
+      const ingestRes = await fetch(`${pyBase}/ingest-analyze`, { method: 'POST', body: form as any, headers: form.getHeaders() });
+      if (!ingestRes.ok) throw new Error('ingest-analyze failed');
+      const analysis = await ingestRes.json();
 
       await updateStatus(jobId, 'copy_drafting');
-      const copyRes = await request(`${pyBase}/copy`, { method: 'POST', body: JSON.stringify({ copy: record.copy_instructions || {}, facts: record.facts || {}, brand_kit_id: record.brand_kit_id, constraints: record.constraints || {} }), headers: { 'content-type': 'application/json' } });
-      const copy = await copyRes.body.json();
+      const copyRes = await fetch(`${pyBase}/copy`, {
+        method: 'POST',
+        body: JSON.stringify({
+          copy_instructions: record.copy_instructions || '',
+          facts: record.facts || {},
+          brand_kit_id: record.brand_kit_id,
+          constraints: record.constraints || {}
+        }),
+        headers: { 'content-type': 'application/json' }
+      });
+      if (!copyRes.ok) throw new Error('copy failed');
+      const copy = await copyRes.json();
 
       await updateStatus(jobId, 'composing');
-      const composeRes = await request(`${pyBase}/compose`, { method: 'POST', body: JSON.stringify({ template_id: record.template_id, copy }), headers: { 'content-type': 'application/json' } });
-      const composition = await composeRes.body.json();
+      // Use the first crop proposal for now
+      const crop_info = analysis.crops && analysis.crops[0] ? analysis.crops[0] : { width: 1080, height: 1080 };
+      const composeRes = await fetch(`${pyBase}/compose`, {
+        method: 'POST',
+        body: JSON.stringify({
+          copy,
+          analysis,
+          crop_info
+        }),
+        headers: { 'content-type': 'application/json' }
+      });
+      if (!composeRes.ok) throw new Error('compose failed');
+      const composition = await composeRes.json();
 
       await updateStatus(jobId, 'rendering');
-      const renderRes = await request(`${pyBase}/render`, { method: 'POST', body: JSON.stringify({ composition }), headers: { 'content-type': 'application/json' } });
-      const render = await renderRes.body.json();
+      const renderRes = await fetch(`${pyBase}/render`, {
+        method: 'POST',
+        body: JSON.stringify({
+          composition,
+          crop_info,
+          job_id: jobId
+        }),
+        headers: { 'content-type': 'application/json' }
+      });
+      if (!renderRes.ok) throw new Error('render failed');
+      const render = await renderRes.json();
 
       await updateStatus(jobId, 'qa');
-      await request(`${pyBase}/qa`, { method: 'POST', body: JSON.stringify({ render }), headers: { 'content-type': 'application/json' } });
+      const qaRes = await fetch(`${pyBase}/qa`, {
+        method: 'POST',
+        body: JSON.stringify({
+          composition,
+          render,
+          copy
+        }),
+        headers: { 'content-type': 'application/json' }
+      });
+      const qa = await qaRes.json();
+      if (!qa.ok) throw new Error('QA failed: ' + (qa.error || 'unknown'));
 
       await updateStatus(jobId, 'exporting');
-      const exportRes = await request(`${pyBase}/export`, { method: 'POST', body: JSON.stringify({ render }), headers: { 'content-type': 'application/json' } });
-      const exported = await exportRes.body.json();
+      const exportRes = await fetch(`${pyBase}/export`, {
+        method: 'POST',
+        body: JSON.stringify({
+          render,
+          job_id: jobId,
+          timestamp: new Date().toISOString()
+        }),
+        headers: { 'content-type': 'application/json' }
+      });
+      if (!exportRes.ok) throw new Error('export failed');
+      const exported = await exportRes.json();
 
       await saveOutputs(jobId, exported.outputs || []);
       await updateStatus(jobId, 'done');
@@ -62,6 +138,11 @@ const worker = new Worker(
       console.error('Pipeline failed', err);
       await pg.query('update jobs set status=$2, errors = coalesce(errors, ' + "'[]'" + ') || $3::jsonb, updated_at=now() where id=$1', [jobId, 'failed', JSON.stringify([{ message: String(err) }])]);
       throw err;
+    } finally {
+      // Clean up temp image
+      if (tempImagePath && fs.existsSync(tempImagePath)) {
+        fs.unlinkSync(tempImagePath);
+      }
     }
   },
   { connection: redis as any, concurrency: 2 }

@@ -22,6 +22,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+#docker host
+/infra/docker-compose.yml
+
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
