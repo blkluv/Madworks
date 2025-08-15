@@ -4,6 +4,7 @@ import React, { useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ImageIcon, Send, PlusCircle, Paperclip } from "lucide-react"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
 // Types matching the API route logs
 // Minimal chat message + conversation types
@@ -70,6 +71,15 @@ export function ChatView() {
   const [busy, setBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
+  // Dimension selector state
+  const [selectedVariants, setSelectedVariants] = useState<string[]>(["square", "portrait"]) // defaults
+  const variantOptions: Record<string, { label: string; width: number; height: number }> = {
+    square: { label: "Square 1:1", width: 1080, height: 1080 },
+    portrait: { label: "Portrait 4:5", width: 1080, height: 1350 },
+    landscape: { label: "Landscape 16:9", width: 1920, height: 1080 },
+    story: { label: "Story 9:16", width: 1080, height: 1920 },
+  }
+
   const [conversations, setConversations] = useState<Conversation[]>([
     { id: "c_default", title: "New chat", messages: [] },
   ])
@@ -110,6 +120,14 @@ export function ChatView() {
       const form = new FormData()
       form.append("prompt", prompt || "")
       if (imageFile) form.append("image", imageFile, imageFile.name || "upload.png")
+
+      // Include selected sizes for the orchestrator
+      const sizes = selectedVariants.map((v) => ({
+        name: v,
+        width: variantOptions[v].width,
+        height: variantOptions[v].height,
+      }))
+      if (sizes.length > 0) form.append("sizes", JSON.stringify(sizes))
 
       const res = await fetch("/api/pipeline/run", { method: "POST", body: form })
       if (!res.ok) {
@@ -223,6 +241,29 @@ export function ChatView() {
 
         {/* Composer */}
         <div className="border-t border-zinc-900 p-3">
+          {/* Dimension selector */}
+          <div className="mb-2">
+            <div className="text-xs text-zinc-400 mb-1">Select output dimensions</div>
+            <ToggleGroup
+              type="multiple"
+              value={selectedVariants}
+              onValueChange={(v) => setSelectedVariants(Array.isArray(v) ? v : [])}
+              className="bg-zinc-900/50 border border-zinc-800 rounded-md"
+            >
+              <ToggleGroupItem value="square" className="px-3 py-2 text-xs">
+                {variantOptions.square.label}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="portrait" className="px-3 py-2 text-xs">
+                {variantOptions.portrait.label}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="landscape" className="px-3 py-2 text-xs">
+                {variantOptions.landscape.label}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="story" className="px-3 py-2 text-xs">
+                {variantOptions.story.label}
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
           <form className="flex items-center gap-2" onSubmit={handleSend}>
             <input
               type="file"
@@ -264,3 +305,4 @@ export function ChatView() {
     </div>
   )
 }
+

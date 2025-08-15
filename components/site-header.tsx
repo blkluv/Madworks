@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle } from "lucide-react"
 import { useState } from "react"
 
-type ViewType = "home" | "upload" | "projects" | "gallery" | "premium" | "chat"
+type ViewType = "home" | "projects" | "gallery" | "premium" | "chat"
 
 export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewType; onNavChange?: (v: ViewType) => void }) {
   const [showAccountDropdown, setShowAccountDropdown] = useState(false)
@@ -31,9 +31,6 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                 <div className="flex items-center gap-2">
                   <Button data-nav="home" onClick={() => goto("home")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'home' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
                     <Home className="w-4 h-4 mr-2" /> Home
-                  </Button>
-                  <Button data-nav="upload" onClick={() => goto("upload")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'upload' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
-                    <ImageIcon className="w-4 h-4 mr-2" /> Upload
                   </Button>
                   <Button data-nav="projects" onClick={() => goto("projects")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'projects' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
                     <Folder className="w-4 h-4 mr-2" /> Projects

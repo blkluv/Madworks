@@ -59,6 +59,11 @@ PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', 'http://localhost:8000').rstrip('
 try:
     Path(STORAGE_DIR).mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
+    # Extra aliases so clients can fetch both /static/... and /outputs/... paths
+    # This covers cases where URLs are constructed as /outputs/{bucket}/{key}
+    # (e.g., outputs/outputs/...) or /assets/... without the /static prefix.
+    app.mount("/outputs", StaticFiles(directory=STORAGE_DIR), name="outputs")
+    app.mount("/assets", StaticFiles(directory=STORAGE_DIR), name="assets")
 except Exception as _e:
     # Mounting static is best-effort; S3 mode might not need this
     pass
@@ -447,24 +452,32 @@ def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], 
     headline_block_h = len(headline_lines) * headline_size + (len(headline_lines) - 1) * line_gap
     subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
 
-    # SVG template with strong left-to-right gradient and drop shadow for legibility
+    # SVG template with legibility gradient (applied only when an image exists) and a clean fallback background
     svg_template = """
     <svg width="{{ width }}" height="{{ height }}" viewBox="0 0 {{ width }} {{ height }}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <defs>
             <linearGradient id="shade" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#000000" stop-opacity="0.55" />
-                <stop offset="50%" stop-color="#000000" stop-opacity="0.32" />
-                <stop offset="100%" stop-color="#000000" stop-opacity="0.12" />
+                <stop offset="0%" stop-color="#000000" stop-opacity="0.35" />
+                <stop offset="50%" stop-color="#000000" stop-opacity="0.20" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="0.08" />
+            </linearGradient>
+            <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#1f2937" stop-opacity="1" />
+                <stop offset="100%" stop-color="#111827" stop-opacity="1" />
             </linearGradient>
             <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
                 <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
             </filter>
         </defs>
 
-        <!-- Background image -->
+        <!-- Background -->
+        {% if original_url %}
         <image href="{{ original_url }}" xlink:href="{{ original_url }}" x="0" y="0" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"/>
         <!-- Legibility gradient overlay -->
         <rect width="100%" height="100%" fill="url(#shade)" />
+        {% else %}
+        <rect width="100%" height="100%" fill="url(#bg)" />
+        {% endif %}
 
         <!-- Content -->
         <g>
@@ -577,9 +590,15 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
     png_url, _ = _upload_bytes(outputs_bucket, png_key, png_bytes, 'image/png')
     outputs.append(RenderOutput(format="png", width=width, height=height, url=png_url))
 
-    # 3) Convert PNG -> JPG via Pillow and upload
+    # 3) Convert PNG -> JPG via Pillow and upload (flatten any transparency onto white to avoid dark backgrounds)
     with Image.open(io.BytesIO(png_bytes)) as im:
-        rgb_im = im.convert('RGB')
+        if im.mode in ('RGBA', 'LA') or (im.mode == 'P' and 'transparency' in im.info):
+            background = Image.new('RGB', im.size, (255, 255, 255))
+            alpha = im.split()[-1] if im.mode != 'P' else Image.new('L', im.size, 255)
+            background.paste(im, mask=alpha)
+            rgb_im = background
+        else:
+            rgb_im = im.convert('RGB')
         jpg_buffer = io.BytesIO()
         rgb_im.save(jpg_buffer, format='JPEG', quality=90)
         jpg_buffer.seek(0)
@@ -843,5 +862,3 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-

@@ -72,6 +72,7 @@ export async function POST(req: Request) {
   let crop_width = 1080;
   let crop_height = 1080;
   let imageFile: File | undefined;
+  let sizes: Array<{ name?: string; width: number; height: number }> | null = null;
 
   try {
     // Try to parse as multipart first
@@ -93,6 +94,17 @@ export async function POST(req: Request) {
       if (maybeFile && maybeFile instanceof File) {
         imageFile = maybeFile;
       }
+      const sizesRaw = form.get("sizes");
+      if (sizesRaw && typeof sizesRaw === "string") {
+        try {
+          const parsed = JSON.parse(sizesRaw);
+          if (Array.isArray(parsed)) {
+            sizes = parsed
+              .map((s: any) => ({ name: s?.name, width: Number(s?.width), height: Number(s?.height) }))
+              .filter((s: any) => Number.isFinite(s.width) && Number.isFinite(s.height));
+          }
+        } catch (_) {}
+      }
     } else {
       const json = await req.json().catch(() => ({}));
       prompt = String(json.prompt || "");
@@ -102,6 +114,11 @@ export async function POST(req: Request) {
       temperature = json.temperature ?? 0.7;
       crop_width = json.crop_width ?? 1080;
       crop_height = json.crop_height ?? 1080;
+      if (Array.isArray(json.sizes)) {
+        sizes = json.sizes
+          .map((s: any) => ({ name: s?.name, width: Number(s?.width), height: Number(s?.height) }))
+          .filter((s: any) => Number.isFinite(s.width) && Number.isFinite(s.height));
+      }
       // No image via JSON
     }
   } catch (e) {
@@ -154,17 +171,18 @@ export async function POST(req: Request) {
   }
 
   // Step 3 + 4: Compose and Render for multiple aspect ratios
-  const sizes = [
+  const defaultSizes = [
     { name: "square", width: 1080, height: 1080 },
     { name: "portrait", width: 1080, height: 1350 },
     { name: "landscape", width: 1920, height: 1080 },
     { name: "story", width: 1080, height: 1920 },
   ];
+  const sizesToUse = (sizes && sizes.length ? sizes : defaultSizes) as Array<{ name?: string; width: number; height: number }>;
   const combinedOutputs: any[] = [];
   let combinedThumb: string | undefined = undefined;
   try {
     const useCopy = copy?.variants?.[0] || copy || { headline: "", subheadline: "", cta: "Learn More" };
-    for (const s of sizes) {
+    for (const s of sizesToUse) {
       const t2 = Date.now();
       logStep(logs, `compose_${s.name}`, "start", `Composing SVG ${s.width}x${s.height}`);
       const composePayload = {

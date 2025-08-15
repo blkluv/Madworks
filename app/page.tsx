@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { HomeView } from "@/components/home-view"
-import { UploadInterface } from "@/components/upload-interface"
 import { PremiumTemplatesView } from "@/components/premium-templates-view"
 import { ProjectsView } from "@/components/projects-view"
 import { Button } from "@/components/ui/button"
@@ -11,7 +10,7 @@ import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, H
 import { SiteHeader } from "@/components/site-header"
 import { ChatView } from "@/components/chat-view"
 
-type ViewType = "home" | "upload" | "projects" | "gallery" | "premium" | "chat"
+type ViewType = "home" | "projects" | "gallery" | "premium" | "chat"
 
 export default function HomePage() {
   const { credits } = useApp()
@@ -63,7 +62,6 @@ export default function HomePage() {
       <div className="relative z-10 pt-8">
         <div className="container mx-auto px-4 pb-8">
           {currentView === "home" && <HomeView />}
-          {currentView === "upload" && <UploadInterface />}
           {currentView === "projects" && <ProjectsView />}
           {currentView === "gallery" && <PremiumTemplatesView />}
           {currentView === "chat" && <ChatView />}
@@ -72,3 +70,4 @@ export default function HomePage() {
     </div>
   )
 }
+
