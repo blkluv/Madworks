@@ -433,20 +433,7 @@ export function UploadInterface() {
         </div>
       )}
 
-      {uploadedFiles.length === 0 && (
-        <Card className="bg-slate-800/80 backdrop-blur-sm p-12 text-center rounded-2xl shadow-lg">
-          <div className="max-w-md mx-auto">
-            <div className="p-6 bg-gradient-to-br from-slate-700 to-indigo-700 rounded-2xl w-fit mx-auto mb-6 shadow-lg">
-              <ImageIcon className="w-12 h-12 text-indigo-300" />
-            </div>
-            <h3 className="text-xl font-bold text-white mb-3">No ads uploaded yet</h3>
-            <p className="text-gray-300 leading-relaxed">
-              Upload your first marketing advertisement to get started with AI-powered design analysis and optimization
-              suggestions.
-            </p>
-          </div>
-        </Card>
-      )}
+      {uploadedFiles.length === 0 && null}
     </div>
   )
 }

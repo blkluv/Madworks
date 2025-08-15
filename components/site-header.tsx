@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle } from "lucide-react"
 import { useState } from "react"
 
-type ViewType = "home" | "upload" | "projects" | "gallery" | "premium"
+type ViewType = "home" | "upload" | "projects" | "gallery" | "premium" | "chat"
 
 export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewType; onNavChange?: (v: ViewType) => void }) {
   const [showAccountDropdown, setShowAccountDropdown] = useState(false)
@@ -40,6 +40,10 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   </Button>
                   <Button data-nav="gallery" onClick={() => goto("gallery")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'gallery' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
                     <BookOpen className="w-4 h-4 mr-2" /> Premium Templates
+                  </Button>
+                  <Button data-nav="chat" onClick={() => goto("chat")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'chat' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
+                    {/* Reusing BookOpen icon for simplicity */}
+                    <BookOpen className="w-4 h-4 mr-2" /> Chat
                   </Button>
                 </div>
               </div>

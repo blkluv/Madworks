@@ -9,8 +9,9 @@ import { Button } from "@/components/ui/button"
 import { useApp } from "@/components/app-context"
 import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle } from "lucide-react"
 import { SiteHeader } from "@/components/site-header"
+import { ChatView } from "@/components/chat-view"
 
-type ViewType = "home" | "upload" | "projects" | "gallery" | "premium"
+type ViewType = "home" | "upload" | "projects" | "gallery" | "premium" | "chat"
 
 export default function HomePage() {
   const { credits } = useApp()
@@ -65,6 +66,7 @@ export default function HomePage() {
           {currentView === "upload" && <UploadInterface />}
           {currentView === "projects" && <ProjectsView />}
           {currentView === "gallery" && <PremiumTemplatesView />}
+          {currentView === "chat" && <ChatView />}
         </div>
       </div>
     </div>

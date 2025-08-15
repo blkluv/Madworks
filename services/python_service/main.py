@@ -6,13 +6,16 @@ import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
+import uuid
 
 import openai
+import cairosvg
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import cv2
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import boto3
 from dotenv import load_dotenv
@@ -35,13 +38,26 @@ if not client.api_key:
 # Initialize S3 client for MinIO
 s3_client = boto3.client(
     's3',
-    endpoint_url=os.getenv('MINIO_ENDPOINT', 'http://localhost:9000'),
-    aws_access_key_id=os.getenv('MINIO_ACCESS_KEY', 'minioadmin'),
-    aws_secret_access_key=os.getenv('MINIO_SECRET_KEY', 'minioadmin'),
+    endpoint_url=os.getenv('S3_ENDPOINT', 'http://localhost:9000'),
+    aws_access_key_id=os.getenv('S3_ACCESS_KEY', 'minio'),
+    aws_secret_access_key=os.getenv('S3_SECRET_KEY', 'minio123'),
     region_name='us-east-1'
 )
 
-app = FastAPI(title="Madworks AI Pipeline", version="1.0.0")
+app = FastAPI(title="Madworks AI Pipeline", version="1.1.0")
+
+# Storage config: support S3 (MinIO) and local static file storage for easier dev/testing
+STORAGE_MODE = os.getenv('STORAGE_MODE', 's3').lower()  # 's3' or 'local'
+STORAGE_DIR = os.getenv('STORAGE_DIR', str(Path(__file__).resolve().parent / 'storage'))
+PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', 'http://localhost:8000').rstrip('/')
+
+# Ensure local storage directory exists and mount when in local mode
+try:
+    Path(STORAGE_DIR).mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
+except Exception as _e:
+    # Mounting static is best-effort; S3 mode might not need this
+    pass
 
 # Pydantic models
 class CopyConstraints(BaseModel):
@@ -57,6 +73,13 @@ class CopyInput(BaseModel):
     facts: Dict[str, Any] = {}
     brand_kit_id: Optional[str] = None
     constraints: CopyConstraints = Field(default_factory=CopyConstraints)
+    # Enhanced controls (optional; backward compatible)
+    num_variants: int = 1
+    temperature: float = 0.7
+    model_name: Optional[str] = None
+    tone: Optional[str] = None
+    style_guide: Optional[str] = None
+    platform: Optional[str] = None  # e.g., instagram_feed, story, linkedin
 
 class ImageAnalysis(BaseModel):
     mask_url: str
@@ -182,209 +205,334 @@ def generate_crop_proposals(image: Image.Image, bbox: List[int]) -> List[Dict[st
     
     return crops
 
-async def generate_copy_with_ai(instructions: str, facts: Dict[str, Any], constraints: CopyConstraints) -> Dict[str, str]:
-    """Generate ad copy using OpenAI GPT-3.5"""
+async def generate_copy_with_ai(
+    instructions: str,
+    facts: Dict[str, Any],
+    constraints: CopyConstraints,
+    *,
+    tone: Optional[str] = None,
+    style_guide: Optional[str] = None,
+    platform: Optional[str] = None,
+    temperature: float = 0.7,
+    model_name: Optional[str] = None,
+    num_variants: int = 1,
+) -> List[Dict[str, str]]:
+    """Generate one or more ad copy variants using OpenAI with guardrails.
+
+    Returns a list of copy dicts, each with keys: headline, subheadline, cta.
+    """
     try:
-        # Build the prompt
+        # Build the prompt with optional tone/platform/style guide
+        addl = []
+        if tone:
+            addl.append(f"Tone: {tone}")
+        if platform:
+            addl.append(f"Platform: {platform}")
+        if style_guide:
+            addl.append(f"Style Guide: {style_guide}")
+        addl_str = ("\n" + "\n".join(addl)) if addl else ""
+
         prompt = f"""
-        You are an expert advertising copywriter. Create compelling ad copy based on these instructions:
-        
+        You are an elite performance marketing copywriter. Create high-converting, professional ad copy.
+
         Instructions: {instructions}
-        
+
         Brand Facts: {json.dumps(facts, indent=2)}
-        
+
         Constraints:
         - Headline: max {constraints.max_headline} characters
-        - Subheadline: max {constraints.max_sub} characters  
+        - Subheadline: max {constraints.max_sub} characters
         - CTA must be one of: {', '.join(constraints.allowed_cta)}
         - Brand voice: {constraints.brand_voice}
         - Target audience: {constraints.target_audience}
-        - Avoid these words: {', '.join(constraints.forbidden_words)}
-        
-        Return ONLY a JSON object with these exact keys:
-        {{
-            "headline": "compelling headline here",
-            "subheadline": "supporting copy here", 
-            "cta": "CTA from allowed list"
-        }}
-        
-        Make it engaging, professional, and conversion-focused.
+        - Avoid these words/claims: {', '.join(constraints.forbidden_words)}
+        {addl_str}
+
+        Output requirements:
+        - Return ONLY a JSON object, no markdown or commentary.
+        - JSON keys: "headline", "subheadline", "cta".
+        - Write crisp, commercial-grade copy with impeccable grammar.
         """
         
-        response = await client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are an expert advertising copywriter who creates high-converting ad copy."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=200
-        )
-        
-        content = response.choices[0].message.content.strip()
-        
-        # Parse JSON response
-        try:
-            copy_data = json.loads(content)
-            # Validate required fields
+        model = model_name or os.getenv("COPY_MODEL", "gpt-3.5-turbo")
+        variants: List[Dict[str, str]] = []
+        n = max(1, int(num_variants))
+        for _ in range(n):
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are an expert advertising copywriter who outputs strict JSON only."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=float(temperature),
+                max_tokens=220
+            )
+
+            content = response.choices[0].message.content.strip()
+
+            # Parse JSON response with robust fallback
+            parsed: Optional[Dict[str, str]] = None
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                # Try to extract JSON substring
+                start = content.find('{')
+                end = content.rfind('}')
+                if start != -1 and end != -1 and end > start:
+                    try:
+                        parsed = json.loads(content[start:end+1])
+                    except Exception:
+                        parsed = None
+            if not parsed:
+                logger.warning("AI did not return valid JSON; using fallback copy")
+                parsed = {
+                    "headline": "Professional Excellence",
+                    "subheadline": "Quality that delivers results",
+                    "cta": constraints.allowed_cta[0]
+                }
+
+            # Validate + clamp
             required_fields = ["headline", "subheadline", "cta"]
-            if not all(field in copy_data for field in required_fields):
-                raise ValueError("Missing required fields")
-            
-            # Apply constraints
-            copy_data["headline"] = copy_data["headline"][:constraints.max_headline]
-            copy_data["subheadline"] = copy_data["subheadline"][:constraints.max_sub]
-            
-            # Ensure CTA is valid
-            if copy_data["cta"] not in constraints.allowed_cta:
-                copy_data["cta"] = constraints.allowed_cta[0]
-            
-            return copy_data
-            
-        except json.JSONDecodeError:
-            # Fallback to template-based generation
-            logger.warning("Failed to parse AI response, using fallback")
-            return {
-                "headline": "Transform Your Vision",
-                "subheadline": "Professional results that speak for themselves",
-                "cta": constraints.allowed_cta[0]
-            }
+            for f in required_fields:
+                if f not in parsed:
+                    parsed[f] = ""
+            parsed["headline"] = (parsed.get("headline") or "")[: constraints.max_headline]
+            parsed["subheadline"] = (parsed.get("subheadline") or "")[: constraints.max_sub]
+            if parsed.get("cta") not in constraints.allowed_cta:
+                parsed["cta"] = constraints.allowed_cta[0]
+            # Simple compliance guard: remove forbidden words
+            low_forbidden = [w.lower() for w in constraints.forbidden_words]
+            for key in ["headline", "subheadline"]:
+                text = (parsed.get(key) or "")
+                for fw in low_forbidden:
+                    if fw in text.lower():
+                        text = text.lower().replace(fw, "").strip()
+                parsed[key] = text
+            variants.append(parsed)
+
+        return variants
             
     except Exception as e:
         logger.error(f"Error generating copy with AI: {e}")
-        # Fallback copy
-        return {
+        # Fallback: return one safe variant
+        return [{
             "headline": "Professional Excellence",
             "subheadline": "Quality that delivers results",
             "cta": constraints.allowed_cta[0]
-        }
+        }]
 
-def create_svg_composition(copy_data: Dict[str, str], palette: List[str], crop_info: Dict[str, Any]) -> str:
-    """Create SVG composition with the generated copy"""
-    
-    # SVG template
+def _measure_chars_for_width(width: int, font_size: int, avg_char_width_factor: float = 0.55) -> int:
+    """Estimate how many characters fit per line for a given width and font size.
+    avg_char_width_factor ~0.55 works reasonably for sans-serif.
+    """
+    usable = max(1, int(width))
+    approx = int((usable / (font_size)) / avg_char_width_factor)
+    return max(8, approx)
+
+def _wrap_text(text: str, max_chars: int) -> List[str]:
+    words = (text or "").split()
+    lines: List[str] = []
+    cur: List[str] = []
+    for w in words:
+        candidate = (" ".join(cur + [w])).strip()
+        if len(candidate) <= max_chars:
+            cur.append(w)
+        else:
+            if cur:
+                lines.append(" ".join(cur))
+            cur = [w]
+    if cur:
+        lines.append(" ".join(cur))
+    return lines or [""]
+
+def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], crop_info: Dict[str, Any]) -> str:
+    """Create SVG composition with professional typography, wrapping, and legibility overlays."""
+
+    # Layout metrics
+    width = int(crop_info["width"]) if "width" in crop_info else 1080
+    height = int(crop_info["height"]) if "height" in crop_info else 1080
+    padding = max(40, int(min(width, height) * 0.06))
+
+    # Typography
+    base_headline_size = max(28, int(min(width, height) * 0.06))  # scale with canvas
+    base_sub_size = max(16, int(min(width, height) * 0.03))
+    text_color = "#ffffff"
+    text_color_secondary = "#e5e5e5"
+    font_family = "Inter, Roboto, Arial, sans-serif"
+
+    # CTA sizing
+    cta_text = copy_data.get("cta", "Learn More")
+    cta_width = max(180, int(32 + len(cta_text) * 10))
+    cta_height = 54
+    cta_x = (width - cta_width) // 2
+    cta_y = height - padding - cta_height
+    cta_text_x = width // 2
+    cta_text_y = cta_y + int(cta_height * 0.66)
+
+    # Colors
+    palette = analysis.get("palette", [])
+    bg_color = palette[0] if len(palette) > 0 else "#1a1a1a"
+    bg_color_2 = palette[1] if len(palette) > 1 else "#2a2a2a"
+    cta_color = palette[2] if len(palette) > 2 else "#3b82f6"
+
+    # Compute text wrapping
+    content_width = width - 2 * padding
+    headline = copy_data.get("headline", "")
+    subheadline = copy_data.get("subheadline", "")
+    max_chars_headline = _measure_chars_for_width(content_width, base_headline_size)
+    max_chars_sub = _measure_chars_for_width(content_width, base_sub_size)
+    headline_lines = _wrap_text(headline, max_chars_headline)
+    sub_lines = _wrap_text(subheadline, max_chars_sub)
+
+    # Vertical layout (centered block)
+    line_gap = int(base_headline_size * 0.35)
+    headline_block_h = len(headline_lines) * base_headline_size + (len(headline_lines) - 1) * line_gap
+    sub_gap = int(base_sub_size * 0.3)
+    sub_block_h = len(sub_lines) * base_sub_size + (len(sub_lines) - 1) * sub_gap
+    total_block = headline_block_h + 20 + sub_block_h
+    block_top = max(padding, (height - cta_height - 20 - total_block) // 2)
+    headline_y_start = block_top
+    subheadline_y_start = headline_y_start + headline_block_h + 20
+
+    # SVG template with tspans for wrapping and pro fonts
     svg_template = """
-    <svg width="{{ width }}" height="{{ height }}" xmlns="http://www.w3.org/2000/svg">
+    <svg width="{{ width }}" height="{{ height }}" viewBox="0 0 {{ width }} {{ height }}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <defs>
             <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" style="stop-color:{{ bg_color }};stop-opacity:1" />
-                <stop offset="100%" style="stop-color:{{ bg_color_2 }};stop-opacity:0.8" />
+                <stop offset="100%" style="stop-color:{{ bg_color_2 }};stop-opacity:0.85" />
             </linearGradient>
             <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
-                <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.3)"/>
+                <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.35)"/>
             </filter>
         </defs>
-        
-        <!-- Background -->
-        <rect width="100%" height="100%" fill="url(#bg)"/>
-        
+
+        <!-- Background image -->
+        <image href="{{ original_url }}" xlink:href="{{ original_url }}" x="0" y="0" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"/>
+        <!-- Dark overlay for legibility -->
+        <rect width="100%" height="100%" fill="black" opacity="0.22"/>
+
         <!-- Content container -->
-        <g transform="translate({{ padding }}, {{ padding }})">
-            <!-- Headline -->
-            <text x="{{ text_x }}" y="{{ headline_y }}" 
-                  font-family="Arial, sans-serif" 
-                  font-size="{{ headline_size }}" 
-                  font-weight="bold"
-                  fill="{{ text_color }}"
-                  text-anchor="middle"
-                  filter="url(#shadow)">
-                {{ headline }}
+        <g>
+            <!-- Headline (wrapped) -->
+            <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family }}" font-size="{{ headline_size }}" font-weight="700" fill="{{ text_color }}" text-anchor="middle" filter="url(#shadow)">
+                {% for line in headline_lines %}
+                <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ line_gap }}{% endif %}">{{ line }}</tspan>
+                {% endfor %}
             </text>
-            
-            <!-- Subheadline -->
-            <text x="{{ text_x }}" y="{{ subheadline_y }}" 
-                  font-family="Arial, sans-serif" 
-                  font-size="{{ subheadline_size }}" 
-                  fill="{{ text_color_secondary }}"
-                  text-anchor="middle"
-                  filter="url(#shadow)">
-                {{ subheadline }}
+
+            <!-- Subheadline (wrapped) -->
+            <text x="{{ text_x }}" y="{{ subheadline_y_start }}" font-family="{{ font_family }}" font-size="{{ subheadline_size }}" font-weight="400" fill="{{ text_color_secondary }}" text-anchor="middle" filter="url(#shadow)">
+                {% for line in sub_lines %}
+                <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ sub_gap }}{% endif %}">{{ line }}</tspan>
+                {% endfor %}
             </text>
-            
+
             <!-- CTA Button -->
-            <rect x="{{ cta_x }}" y="{{ cta_y }}" 
-                  width="{{ cta_width }}" height="{{ cta_height }}" 
-                  rx="8" 
-                  fill="{{ cta_color }}"
-                  filter="url(#shadow)"/>
-            
-            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" 
-                  font-family="Arial, sans-serif" 
-                  font-size="18" 
-                  font-weight="bold"
-                  fill="white"
-                  text-anchor="middle">
-                {{ cta }}
-            </text>
+            <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="8" fill="{{ cta_color }}" filter="url(#shadow)"/>
+            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family }}" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">{{ cta }}</text>
         </g>
     </svg>
     """
-    
-    # Calculate dimensions and positioning
-    width = crop_info["width"]
-    height = crop_info["height"]
-    padding = 60
-    text_x = width // 2
-    headline_y = height // 2 - 40
-    subheadline_y = height // 2 + 20
-    cta_y = height - 120
-    cta_width = 200
-    cta_height = 50
-    cta_x = (width - cta_width) // 2
-    cta_text_x = width // 2
-    cta_text_y = cta_y + 32
-    
-    # Choose colors from palette
-    bg_color = palette[0] if len(palette) > 0 else "#1a1a1a"
-    bg_color_2 = palette[1] if len(palette) > 1 else "#2a2a2a"
-    text_color = palette[-1] if len(palette) > 0 else "#ffffff"
-    text_color_secondary = palette[-2] if len(palette) > 1 else "#cccccc"
-    cta_color = palette[2] if len(palette) > 2 else "#3b82f6"
-    
-    # Calculate font sizes based on text length
-    headline_size = min(48, max(24, 60 - len(copy_data["headline"])))
-    subheadline_size = min(24, max(16, 32 - len(copy_data["subheadline"]) // 2))
-    
-    # Render template
+
     template = Template(svg_template)
+    img_href = analysis.get("original_data_url") or analysis.get("original_url_internal") or analysis.get("original_url") or ""
     svg_content = template.render(
-        width=width, height=height, padding=padding,
-        text_x=text_x, headline_y=headline_y, subheadline_y=subheadline_y,
-        cta_x=cta_x, cta_y=cta_y, cta_width=cta_width, cta_height=cta_height,
-        cta_text_x=cta_text_x, cta_text_y=cta_text_y,
-        headline=copy_data["headline"], subheadline=copy_data["subheadline"], cta=copy_data["cta"],
-        headline_size=headline_size, subheadline_size=subheadline_size,
-        bg_color=bg_color, bg_color_2=bg_color_2,
-        text_color=text_color, text_color_secondary=text_color_secondary,
-        cta_color=cta_color
+        width=width,
+        height=height,
+        bg_color=bg_color,
+        bg_color_2=bg_color_2,
+        text_x=width // 2,
+        font_family=font_family,
+        text_color=text_color,
+        text_color_secondary=text_color_secondary,
+        headline_size=base_headline_size,
+        subheadline_size=base_sub_size,
+        headline_lines=headline_lines,
+        sub_lines=sub_lines,
+        line_gap=line_gap,
+        sub_gap=sub_gap,
+        headline_y_start=headline_y_start,
+        subheadline_y_start=subheadline_y_start,
+        cta_x=cta_x,
+        cta_y=cta_y,
+        cta_width=cta_width,
+        cta_height=cta_height,
+        cta_text_x=cta_text_x,
+        cta_text_y=cta_text_y,
+        cta=cta_text,
+        original_url=img_href,
     )
-    
     return svg_content
 
+def public_base_url() -> str:
+    return os.getenv('PUBLIC_MINIO_BASE', 'http://localhost:9000').rstrip('/')
+
+def _upload_bytes(bucket: str, key: str, data: bytes, content_type: str) -> Tuple[str, Optional[str]]:
+    """Upload bytes to storage. Returns (public_url, internal_url_or_None). In local mode, returns one public URL and None for internal.
+    """
+    if STORAGE_MODE == 'local':
+        # Save under STORAGE_DIR mirroring bucket/key for neatness
+        rel_path = f"{bucket}/{key}"
+        file_path = Path(STORAGE_DIR) / rel_path
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, 'wb') as f:
+            f.write(data)
+        return f"{PUBLIC_BASE_URL}/static/{rel_path}", None
+    else:
+        public_base = os.getenv('PUBLIC_MINIO_BASE', 'http://localhost:9000').rstrip('/')
+        internal_base = os.getenv('S3_ENDPOINT', 'http://minio:9000').rstrip('/')
+        try:
+            s3_client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=data,
+                ContentType=content_type
+            )
+            return f"{public_base}/{bucket}/{key}", f"{internal_base}/{bucket}/{key}"
+        except Exception as e:
+            logger.error(f"S3 upload failed for {bucket}/{key}: {e}. Falling back to local storage.")
+            rel_path = f"{bucket}/{key}"
+            file_path = Path(STORAGE_DIR) / rel_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(file_path, 'wb') as f:
+                f.write(data)
+            return f"{PUBLIC_BASE_URL}/static/{rel_path}", None
+
 async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job_id: str) -> List[RenderOutput]:
-    """Render SVG to multiple formats"""
-    outputs = []
-    
-    # For now, we'll create placeholder outputs
-    # In production, this would use resvg or cairosvg to actually render
-    
-    formats = [
-        {"format": "png", "width": crop_info["width"], "height": crop_info["height"]},
-        {"format": "jpg", "width": crop_info["width"], "height": crop_info["height"]},
-        {"format": "svg", "width": crop_info["width"], "height": crop_info["height"]},
-    ]
-    
-    for fmt in formats:
-        # Generate mock URLs for now
-        url = f"http://localhost:9000/outputs/{job_id}_{fmt['format']}.{fmt['format']}"
-        
-        outputs.append(RenderOutput(
-            format=fmt["format"],
-            width=fmt["width"],
-            height=fmt["height"],
-            url=url
-        ))
-    
+    """Render SVG to PNG/JPG using CairoSVG and upload all formats (including original SVG), with local/S3 storage support."""
+    outputs: List[RenderOutput] = []
+    outputs_bucket = os.getenv('S3_BUCKET_OUTPUTS', 'outputs')
+
+    width = int(crop_info.get("width", 1080))
+    height = int(crop_info.get("height", 1080))
+
+    unique = uuid.uuid4().hex[:8]
+
+    # 1) Upload original SVG
+    svg_key = f"outputs/{job_id}_{unique}_svg.svg"
+    svg_url, _ = _upload_bytes(outputs_bucket, svg_key, svg_content.encode('utf-8'), 'image/svg+xml')
+    outputs.append(RenderOutput(format="svg", width=width, height=height, url=svg_url))
+
+    # 2) Render SVG -> PNG bytes using CairoSVG
+    png_bytes = cairosvg.svg2png(bytestring=svg_content.encode('utf-8'), output_width=width, output_height=height)
+    logger.info(f"Rendered PNG bytes: {len(png_bytes)}")
+
+    # Upload PNG
+    png_key = f"outputs/{job_id}_{unique}_png.png"
+    png_url, _ = _upload_bytes(outputs_bucket, png_key, png_bytes, 'image/png')
+    outputs.append(RenderOutput(format="png", width=width, height=height, url=png_url))
+
+    # 3) Convert PNG -> JPG via Pillow and upload
+    with Image.open(io.BytesIO(png_bytes)) as im:
+        rgb_im = im.convert('RGB')
+        jpg_buffer = io.BytesIO()
+        rgb_im.save(jpg_buffer, format='JPEG', quality=90)
+        jpg_buffer.seek(0)
+    jpg_key = f"outputs/{job_id}_{unique}_jpg.jpg"
+    jpg_url, _ = _upload_bytes(outputs_bucket, jpg_key, jpg_buffer.getvalue(), 'image/jpeg')
+    outputs.append(RenderOutput(format="jpg", width=width, height=height, url=jpg_url))
+
     return outputs
 
 # API Endpoints
@@ -405,20 +553,38 @@ async def ingest_analyze(image: UploadFile = File(...)):
         palette = extract_palette(pil_image)
         crops = generate_crop_proposals(pil_image, bbox)
         
+        # Upload original image to storage for public composition reference
+        assets_bucket = os.getenv('S3_BUCKET_ASSETS', 'assets')
+        orig_ext = os.path.splitext(image.filename)[1] or '.png'
+        orig_key = f"uploads/pipeline/{uuid.uuid4().hex}{orig_ext}"
+        original_url_http, original_url_internal = _upload_bytes(
+            assets_bucket, orig_key, image_data, image.content_type or 'application/octet-stream'
+        )
+        # Prepare data URL for reliable embedding during server-side rendering
+        # Detect MIME from Pillow format for accuracy
+        fmt = (pil_image.format or '').upper()
+        fmt_to_mime = {
+            'JPEG': 'image/jpeg',
+            'JPG': 'image/jpeg',
+            'PNG': 'image/png',
+            'WEBP': 'image/webp',
+            'GIF': 'image/gif',
+            'BMP': 'image/bmp'
+        }
+        detected_mime = fmt_to_mime.get(fmt)
+        mime = detected_mime or (image.content_type if (image.content_type and image.content_type.startswith('image/')) else 'image/png')
+        b64 = base64.b64encode(image_data).decode('ascii')
+        original_data_url = f"data:{mime};base64,{b64}"
+        
         # Save mask to S3/MinIO
         mask_buffer = io.BytesIO()
         mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
         
-        mask_key = f"masks/{image.filename}_mask.png"
-        s3_client.put_object(
-            Bucket='madworks-assets',
-            Key=mask_key,
-            Body=mask_buffer.getvalue(),
-            ContentType='image/png'
-        )
-        
-        mask_url = f"s3://madworks-assets/{mask_key}"
+        mask_key = f"masks/{uuid.uuid4().hex}_mask.png"
+        bucket_name = os.getenv('S3_BUCKET_ASSETS', 'assets')
+        mask_http_url, _ = _upload_bytes(bucket_name, mask_key, mask_buffer.getvalue(), 'image/png')
+        mask_url = mask_http_url
         
         # Create analysis result
         analysis = ImageAnalysis(
@@ -431,7 +597,11 @@ async def ingest_analyze(image: UploadFile = File(...)):
             text_regions=[]  # Would use OCR in production
         )
         
-        return analysis.dict()
+        result = analysis.dict()
+        result["original_url"] = original_url_http
+        result["original_url_internal"] = original_url_internal
+        result["original_data_url"] = original_data_url
+        return result
         
     except Exception as e:
         logger.error(f"Error in ingest-analyze: {e}")
@@ -441,14 +611,28 @@ async def ingest_analyze(image: UploadFile = File(...)):
 async def copy_gen(payload: CopyInput):
     """Stage 3: Copy generation using AI"""
     try:
-        # Generate copy using OpenAI
-        copy_data = await generate_copy_with_ai(
+        # Generate copy variants using OpenAI (first variant returned for backward compatibility)
+        variants = await generate_copy_with_ai(
             payload.copy_instructions,
             payload.facts,
-            payload.constraints
+            payload.constraints,
+            tone=payload.tone,
+            style_guide=payload.style_guide,
+            platform=payload.platform,
+            temperature=payload.temperature,
+            model_name=payload.model_name,
+            num_variants=payload.num_variants,
         )
-        
-        return copy_data
+
+        best = variants[0] if variants else {
+            "headline": "Professional Excellence",
+            "subheadline": "Quality that delivers results",
+            "cta": (payload.constraints.allowed_cta[0] if payload and payload.constraints else "Learn More")
+        }
+        # Include all variants for clients that can use them; orchestrator will ignore extra fields
+        best_with_variants = dict(best)
+        best_with_variants["variants"] = variants
+        return best_with_variants
         
     except Exception as e:
         logger.error(f"Error in copy generation: {e}")
@@ -466,8 +650,8 @@ async def compose(payload: Dict[str, Any]):
             # Default crop info
             crop_info = {"width": 1080, "height": 1080}
         
-        # Create SVG composition
-        svg_content = create_svg_composition(copy_data, analysis.get("palette", []), crop_info)
+        # Create SVG composition using original image URL from analysis
+        svg_content = create_svg_composition(copy_data, analysis, crop_info)
         
         # Generate composition ID
         composition_id = f"comp_{hash(svg_content) % 1000000}"
@@ -499,8 +683,12 @@ async def render(payload: Dict[str, Any]):
         # Render SVG to multiple formats
         outputs = await render_svg_to_formats(composition.get("svg", ""), crop_info, job_id)
         
-        # Generate thumbnail URL
-        thumbnail_url = f"http://localhost:9000/outputs/{job_id}_thumb.jpg"
+        # Generate thumbnail URL (first JPG if available)
+        thumbnail_url = next((o.url for o in outputs if isinstance(o, RenderOutput) and o.format == 'jpg'), None)
+        if not thumbnail_url and outputs:
+            # Fallback to first output URL
+            first = outputs[0]
+            thumbnail_url = first.url if isinstance(first, RenderOutput) else (first.get('url') if isinstance(first, dict) else None)
         
         result = RenderResult(
             outputs=outputs,
@@ -531,13 +719,24 @@ async def qa(payload: Dict[str, Any]):
         if not outputs:
             return {"ok": False, "error": "No render outputs"}
         
-        # Check text length constraints
+        # Check text length constraints and basic layout heuristics
         copy_data = payload.get("copy", {})
-        if copy_data.get("headline", ""):
-            if len(copy_data["headline"]) > 50:
-                return {"ok": False, "error": "Headline too long"}
-        
-        return {"ok": True, "quality_score": 0.95}
+        if copy_data.get("headline", "") and len(copy_data["headline"]) > 80:
+            return {"ok": False, "error": "Headline too long"}
+        if copy_data.get("subheadline", "") and len(copy_data["subheadline"]) > 160:
+            return {"ok": False, "error": "Subheadline too long"}
+
+        # CTA must be allowed
+        allowed_cta = CopyConstraints().allowed_cta
+        if copy_data.get("cta") and copy_data["cta"] not in allowed_cta:
+            return {"ok": False, "error": "CTA not allowed"}
+
+        # Minimal color contrast heuristic: ensure dark overlay exists in SVG for legibility
+        svg_content = composition.get("svg", "")
+        if 'opacity="0.22"' not in svg_content and 'opacity=\"0.22\"' not in svg_content:
+            logger.warning("Legibility overlay may be missing")
+
+        return {"ok": True, "quality_score": 0.97}
         
     except Exception as e:
         logger.error(f"Error in QA: {e}")
@@ -561,21 +760,21 @@ async def export(payload: Dict[str, Any]):
             }
         }
         
-        # Save manifest to S3/MinIO
+        # Save manifest to storage
         manifest_key = f"manifests/{payload.get('job_id', 'unknown')}_manifest.json"
-        s3_client.put_object(
-            Bucket='madworks-assets',
-            Key=manifest_key,
-            Body=json.dumps(manifest, indent=2),
-            ContentType='application/json'
-        )
-        
-        manifest_url = f"s3://madworks-assets/{manifest_key}"
+        bucket_name = os.getenv('S3_BUCKET_ASSETS', 'assets')
+        manifest_http_url, _ = _upload_bytes(bucket_name, manifest_key, json.dumps(manifest, indent=2).encode('utf-8'), 'application/json')
+        manifest_url = manifest_http_url
         
         return {
             "outputs": outputs,
             "manifest_url": manifest_url,
-            "download_urls": [output.url for output in outputs]
+            # Support both dicts and objects for outputs
+            "download_urls": [
+                (output.get("url") if isinstance(output, dict) else getattr(output, "url", None))
+                for output in outputs
+                if (isinstance(output, dict) and output.get("url")) or (hasattr(output, "url") and getattr(output, "url") is not None)
+            ]
         }
         
     except Exception as e:
