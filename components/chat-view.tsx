@@ -27,12 +27,12 @@ type PipelineResponse = {
   copy_best?: { headline: string; subheadline: string; cta: string } | null
   copy_variants?: Array<{ headline: string; subheadline: string; cta: string }>
   composition?: { composition_id: string; svg: string; layout_data: any }
-  render?: { outputs: Array<{ format: string; width: number; height: number; url: string }>; thumbnail_url?: string }
+  render?: { outputs: Array<{ format: string; width: number; height: number; url: string; variant?: string }>; thumbnail_url?: string }
   qa?: any
   export?: any
   logs: any[]
   thumbnail_url?: string
-  outputs?: Array<{ format: string; width: number; height: number; url: string }>
+  outputs?: Array<{ format: string; width: number; height: number; url: string; variant?: string }>
 }
 
 // Normalize pipeline asset URLs to use the exposed localhost port in dev
@@ -127,11 +127,24 @@ export function ChatView() {
         textParts.push(`Generated ${json.copy_variants.length} copy variants.`)
       }
 
-      const attachments: Array<{ type: "image"; url: string }> = []
-      if (json.thumbnail_url) attachments.push({ type: "image", url: normalizeUrl(json.thumbnail_url) })
+      // Select exactly one JPG per variant (aspect ratio) and order them
+      const order = ["square", "portrait", "landscape", "story"]
+      const byVariant = new Map<string, string>()
       for (const o of json.outputs || []) {
-        const fmt = o.format.toLowerCase()
-        if (["png", "jpg", "jpeg", "webp", "svg"].includes(fmt)) attachments.push({ type: "image", url: normalizeUrl(o.url) })
+        const fmt = (o.format || "").toLowerCase()
+        if (fmt === "jpg" || fmt === "jpeg") {
+          const v = (o.variant as string) || "default"
+          if (!byVariant.has(v)) byVariant.set(v, normalizeUrl(o.url))
+        }
+      }
+      const attachments: Array<{ type: "image"; url: string }> = []
+      for (const v of order) {
+        const url = byVariant.get(v)
+        if (url) attachments.push({ type: "image", url })
+      }
+      // Fallback: if no known variants, include whatever jpgs exist
+      if (attachments.length === 0) {
+        for (const [_, url] of byVariant) attachments.push({ type: "image", url })
       }
 
       const assistantMsg: ChatMessage = {

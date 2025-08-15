@@ -23,6 +23,10 @@ import aiofiles
 import requests
 from jinja2 import Template
 
+# URL and mime helpers
+from urllib.parse import urlparse
+import mimetypes
+
 # Load environment variables
 load_dotenv()
 
@@ -345,109 +349,157 @@ def _wrap_text(text: str, max_chars: int) -> List[str]:
         lines.append(" ".join(cur))
     return lines or [""]
 
+def _try_build_data_url_from_storage(original_url: str) -> Optional[str]:
+    """If the URL points to our mounted /static path in local mode, load bytes directly
+    from STORAGE_DIR and return a data URL. Returns None on failure."""
+    try:
+        if not original_url:
+            return None
+        p = urlparse(original_url)
+        path = p.path or ""
+        if path.startswith("/static/"):
+            rel_path = path[len("/static/"):]
+            file_path = Path(STORAGE_DIR) / rel_path
+            if file_path.exists():
+                data = file_path.read_bytes()
+                mime, _ = mimetypes.guess_type(str(file_path))
+                mime = mime or "image/png"
+                b64 = base64.b64encode(data).decode("ascii")
+                return f"data:{mime};base64,{b64}"
+    except Exception as e:
+        logger.warning(f"Failed to build data URL from storage: {e}")
+    return None
+
+def _resolve_img_href(analysis: Dict[str, Any]) -> str:
+    """Robustly resolve the best image href for SVG <image> tag.
+    Priority: sizeable original_data_url -> local static file -> HTTP fetch -> empty."""
+    data_url = (analysis.get("original_data_url") or "").strip()
+    # Ensure it's not an empty/placeholder tiny data URL
+    if data_url.startswith("data:") and len(data_url) > 100:
+        return data_url
+
+    # Try local static path from public/internal URL
+    for key in ("original_url_internal", "original_url"):
+        url = (analysis.get(key) or "").strip()
+        if url:
+            du = _try_build_data_url_from_storage(url)
+            if du:
+                return du
+            # Fallback: HTTP fetch (works in s3/minio mode)
+            try:
+                resp = requests.get(url, timeout=5)
+                if resp.ok and resp.content:
+                    mime = resp.headers.get("Content-Type", "image/png")
+                    b64 = base64.b64encode(resp.content).decode("ascii")
+                    return f"data:{mime};base64,{b64}"
+            except Exception as e:
+                logger.warning(f"HTTP fetch failed for original image: {e}")
+    return ""
+
 def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], crop_info: Dict[str, Any]) -> str:
-    """Create SVG composition with professional typography, wrapping, and legibility overlays."""
+    """Create SVG composition with a fixed, professional layout:
+    - Full-bleed background image with strong legibility gradient
+    - Left-aligned bold white headline
+    - Left-aligned supporting copy below
+    - Bottom-left CTA button
+    """
 
     # Layout metrics
     width = int(crop_info["width"]) if "width" in crop_info else 1080
     height = int(crop_info["height"]) if "height" in crop_info else 1080
     padding = max(40, int(min(width, height) * 0.06))
 
-    # Typography
-    base_headline_size = max(28, int(min(width, height) * 0.06))  # scale with canvas
-    base_sub_size = max(16, int(min(width, height) * 0.03))
+    # Typography (scaled to canvas)
+    headline_size = max(36, int(min(width, height) * 0.11))
+    sub_size = max(18, int(min(width, height) * 0.035))
     text_color = "#ffffff"
     text_color_secondary = "#e5e5e5"
     font_family = "Inter, Roboto, Arial, sans-serif"
+    letter_spacing = 0  # tweakable
 
-    # CTA sizing
+    # CTA sizing and placement (bottom-left)
     cta_text = copy_data.get("cta", "Learn More")
-    cta_width = max(180, int(32 + len(cta_text) * 10))
-    cta_height = 54
-    cta_x = (width - cta_width) // 2
+    cta_width = max(200, int(44 + len(cta_text) * 11))
+    cta_height = max(52, int(min(width, height) * 0.055))
+    cta_x = padding
     cta_y = height - padding - cta_height
-    cta_text_x = width // 2
+    cta_text_x = cta_x + cta_width // 2
     cta_text_y = cta_y + int(cta_height * 0.66)
 
-    # Colors
+    # Colors / accents
     palette = analysis.get("palette", [])
-    bg_color = palette[0] if len(palette) > 0 else "#1a1a1a"
-    bg_color_2 = palette[1] if len(palette) > 1 else "#2a2a2a"
-    cta_color = palette[2] if len(palette) > 2 else "#3b82f6"
+    cta_color = palette[2] if len(palette) > 2 else "#2563EB"  # blue
 
-    # Compute text wrapping
+    # Text wrapping
     content_width = width - 2 * padding
-    headline = copy_data.get("headline", "")
-    subheadline = copy_data.get("subheadline", "")
-    max_chars_headline = _measure_chars_for_width(content_width, base_headline_size)
-    max_chars_sub = _measure_chars_for_width(content_width, base_sub_size)
+    headline = copy_data.get("headline", "").strip()
+    subheadline = copy_data.get("subheadline", "").strip()
+    max_chars_headline = _measure_chars_for_width(content_width, headline_size)
+    max_chars_sub = _measure_chars_for_width(content_width, sub_size)
     headline_lines = _wrap_text(headline, max_chars_headline)
     sub_lines = _wrap_text(subheadline, max_chars_sub)
 
-    # Vertical layout (centered block)
-    line_gap = int(base_headline_size * 0.35)
-    headline_block_h = len(headline_lines) * base_headline_size + (len(headline_lines) - 1) * line_gap
-    sub_gap = int(base_sub_size * 0.3)
-    sub_block_h = len(sub_lines) * base_sub_size + (len(sub_lines) - 1) * sub_gap
-    total_block = headline_block_h + 20 + sub_block_h
-    block_top = max(padding, (height - cta_height - 20 - total_block) // 2)
-    headline_y_start = block_top
-    subheadline_y_start = headline_y_start + headline_block_h + 20
+    # Vertical rhythm: headline near upper-left, sub below, CTA at bottom-left
+    line_gap = int(headline_size * 0.28)
+    sub_gap = int(sub_size * 0.24)
+    headline_y_start = padding + headline_size  # first baseline
+    # compute block height for headline
+    headline_block_h = len(headline_lines) * headline_size + (len(headline_lines) - 1) * line_gap
+    subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
 
-    # SVG template with tspans for wrapping and pro fonts
+    # SVG template with strong left-to-right gradient and drop shadow for legibility
     svg_template = """
     <svg width="{{ width }}" height="{{ height }}" viewBox="0 0 {{ width }} {{ height }}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <defs>
-            <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:{{ bg_color }};stop-opacity:1" />
-                <stop offset="100%" style="stop-color:{{ bg_color_2 }};stop-opacity:0.85" />
+            <linearGradient id="shade" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#000000" stop-opacity="0.55" />
+                <stop offset="50%" stop-color="#000000" stop-opacity="0.32" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="0.12" />
             </linearGradient>
             <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
-                <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.35)"/>
+                <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
             </filter>
         </defs>
 
         <!-- Background image -->
         <image href="{{ original_url }}" xlink:href="{{ original_url }}" x="0" y="0" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"/>
-        <!-- Dark overlay for legibility -->
-        <rect width="100%" height="100%" fill="black" opacity="0.22"/>
+        <!-- Legibility gradient overlay -->
+        <rect width="100%" height="100%" fill="url(#shade)" />
 
-        <!-- Content container -->
+        <!-- Content -->
         <g>
-            <!-- Headline (wrapped) -->
-            <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family }}" font-size="{{ headline_size }}" font-weight="700" fill="{{ text_color }}" text-anchor="middle" filter="url(#shadow)">
+            <!-- Headline -->
+            <text x="{{ padding }}" y="{{ headline_y_start }}" font-family="{{ font_family }}" font-size="{{ headline_size }}" font-weight="800" fill="{{ text_color }}" letter-spacing="{{ letter_spacing }}" filter="url(#shadow)">
                 {% for line in headline_lines %}
-                <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ line_gap }}{% endif %}">{{ line }}</tspan>
+                <tspan x="{{ padding }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">{{ line }}</tspan>
                 {% endfor %}
             </text>
 
-            <!-- Subheadline (wrapped) -->
-            <text x="{{ text_x }}" y="{{ subheadline_y_start }}" font-family="{{ font_family }}" font-size="{{ subheadline_size }}" font-weight="400" fill="{{ text_color_secondary }}" text-anchor="middle" filter="url(#shadow)">
+            <!-- Subheadline -->
+            <text x="{{ padding }}" y="{{ subheadline_y_start }}" font-family="{{ font_family }}" font-size="{{ sub_size }}" font-weight="500" fill="{{ text_color_secondary }}" letter-spacing="0" filter="url(#shadow)">
                 {% for line in sub_lines %}
-                <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ sub_gap }}{% endif %}">{{ line }}</tspan>
+                <tspan x="{{ padding }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">{{ line }}</tspan>
                 {% endfor %}
             </text>
 
             <!-- CTA Button -->
-            <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="8" fill="{{ cta_color }}" filter="url(#shadow)"/>
-            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family }}" font-size="18" font-weight="700" fill="#ffffff" text-anchor="middle">{{ cta }}</text>
+            <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="10" fill="{{ cta_color }}" filter="url(#shadow)"/>
+            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta }}</text>
         </g>
     </svg>
     """
 
     template = Template(svg_template)
-    img_href = analysis.get("original_data_url") or analysis.get("original_url_internal") or analysis.get("original_url") or ""
+    img_href = _resolve_img_href(analysis)
     svg_content = template.render(
         width=width,
         height=height,
-        bg_color=bg_color,
-        bg_color_2=bg_color_2,
-        text_x=width // 2,
+        padding=padding,
         font_family=font_family,
         text_color=text_color,
         text_color_secondary=text_color_secondary,
-        headline_size=base_headline_size,
-        subheadline_size=base_sub_size,
+        headline_size=headline_size,
+        sub_size=sub_size,
         headline_lines=headline_lines,
         sub_lines=sub_lines,
         line_gap=line_gap,
@@ -461,7 +513,9 @@ def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], 
         cta_text_x=cta_text_x,
         cta_text_y=cta_text_y,
         cta=cta_text,
+        letter_spacing=letter_spacing,
         original_url=img_href,
+        int=int,
     )
     return svg_content
 

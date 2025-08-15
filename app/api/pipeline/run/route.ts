@@ -153,46 +153,52 @@ export async function POST(req: Request) {
     logStep(logs, "copy", "error", "Failed to generate copy", undefined, Date.now() - t1, e);
   }
 
-  // Step 3: Compose SVG
-  const t2 = Date.now();
-  logStep(logs, "compose", "start", "Composing SVG");
+  // Step 3 + 4: Compose and Render for multiple aspect ratios
+  const sizes = [
+    { name: "square", width: 1080, height: 1080 },
+    { name: "portrait", width: 1080, height: 1350 },
+    { name: "landscape", width: 1920, height: 1080 },
+    { name: "story", width: 1080, height: 1920 },
+  ];
+  const combinedOutputs: any[] = [];
+  let combinedThumb: string | undefined = undefined;
   try {
-    const crop_info = { width: crop_width, height: crop_height };
     const useCopy = copy?.variants?.[0] || copy || { headline: "", subheadline: "", cta: "Learn More" };
-    const composePayload = {
-      copy: useCopy,
-      analysis: analysis || {},
-      crop_info,
-    };
-    composition = await fetchJson(`${PIPELINE_URL}/compose`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(composePayload),
-    });
-    logStep(logs, "compose", "ok", "SVG composed", { composition_id: composition?.composition_id }, Date.now() - t2);
-  } catch (e) {
-    ok = false;
-    logStep(logs, "compose", "error", "Failed to compose SVG", undefined, Date.now() - t2, e);
-  }
+    for (const s of sizes) {
+      const t2 = Date.now();
+      logStep(logs, `compose_${s.name}`, "start", `Composing SVG ${s.width}x${s.height}`);
+      const composePayload = {
+        copy: useCopy,
+        analysis: analysis || {},
+        crop_info: { width: s.width, height: s.height },
+      };
+      const comp = await fetchJson(`${PIPELINE_URL}/compose`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(composePayload),
+      });
+      if (!composition) composition = comp; // capture first for backward compat
+      logStep(logs, `compose_${s.name}`, "ok", "SVG composed", { composition_id: comp?.composition_id }, Date.now() - t2);
 
-  // Step 4: Render
-  const t3 = Date.now();
-  logStep(logs, "render", "start", "Rendering outputs");
-  try {
-    const renderPayload = {
-      composition,
-      crop_info: { width: crop_width, height: crop_height },
-      job_id,
-    };
-    renderRes = await fetchJson(`${PIPELINE_URL}/render`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(renderPayload),
-    });
-    logStep(logs, "render", "ok", "Rendered outputs", { outputs: renderRes?.outputs?.length }, Date.now() - t3);
+      const t3 = Date.now();
+      logStep(logs, `render_${s.name}`, "start", `Rendering ${s.width}x${s.height}`);
+      const renderPayload = { composition: comp, crop_info: { width: s.width, height: s.height }, job_id };
+      const r = await fetchJson(`${PIPELINE_URL}/render`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(renderPayload),
+      });
+      // Tag outputs with variant for client-side use
+      const outs = (r?.outputs || []).map((o: any) => ({ ...o, variant: s.name }));
+      combinedOutputs.push(...outs);
+      if (!combinedThumb) combinedThumb = r?.thumbnail_url;
+      logStep(logs, `render_${s.name}`, "ok", "Rendered outputs", { outputs: outs.length }, Date.now() - t3);
+    }
+
+    renderRes = { outputs: combinedOutputs, thumbnail_url: combinedThumb };
   } catch (e) {
     ok = false;
-    logStep(logs, "render", "error", "Failed to render outputs", undefined, Date.now() - t3, e);
+    logStep(logs, "render_all", "error", "Failed composing/rendering variants", undefined, undefined, e);
   }
 
   // Step 5: QA
