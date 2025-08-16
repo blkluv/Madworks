@@ -44,7 +44,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   size="lg"
                   className={`rounded-xl px-6 py-3 font-semibold ${currentView === 'chat' ? 'bg-black/70 text-white' : ''}`}
                 >
-                  <BookOpen className="w-4 h-4 mr-2" /> Chat
+                  <BookOpen className="w-4 h-4 mr-2" /> Create
                 </Button>
                 <Button
                   data-nav="projects"
@@ -71,7 +71,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
           <div className="flex items-center gap-2">
             <Button
               onClick={() => (window.location.href = "/upgrade")}
-              className="h-10 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 hover:from-indigo-700 hover:via-pink-700 hover:to-orange-600 text-white shadow-lg"
+              className="h-10 px-4 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black shadow-lg shadow-yellow-500/25"
             >
               <Crown className="w-4 h-4 mr-2" /> Upgrade
             </Button>
@@ -105,5 +105,3 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
     </div>
   )
 }
-
-

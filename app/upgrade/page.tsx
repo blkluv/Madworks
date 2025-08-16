@@ -27,7 +27,7 @@ export default function UpgradePage() {
         <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
           <Card className="bg-zinc-950/80 border border-zinc-900 rounded-3xl p-8 backdrop-blur flex flex-col">
             <div className="mb-6">
-              <h3 className="text-xl font-bold mb-1">Basic</h3>
+              <h3 className="text-xl font-bold mb-1">Bascc</h3>
               <div className="text-3xl font-bold">$0</div>
               <div className="text-zinc-400">per month</div>
             </div>
