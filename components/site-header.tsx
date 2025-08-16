@@ -32,15 +32,15 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   <Button data-nav="home" onClick={() => goto("home")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'home' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
                     <Home className="w-4 h-4 mr-2" /> Home
                   </Button>
+                  <Button data-nav="chat" onClick={() => goto("chat")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'chat' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
+                    {/* Reusing BookOpen icon for simplicity */}
+                    <BookOpen className="w-4 h-4 mr-2" /> Chat
+                  </Button>
                   <Button data-nav="projects" onClick={() => goto("projects")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'projects' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
                     <Folder className="w-4 h-4 mr-2" /> Projects
                   </Button>
                   <Button data-nav="gallery" onClick={() => goto("gallery")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'gallery' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
                     <BookOpen className="w-4 h-4 mr-2" /> Premium Templates
-                  </Button>
-                  <Button data-nav="chat" onClick={() => goto("chat")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'chat' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
-                    {/* Reusing BookOpen icon for simplicity */}
-                    <BookOpen className="w-4 h-4 mr-2" /> Chat
                   </Button>
                 </div>
               </div>

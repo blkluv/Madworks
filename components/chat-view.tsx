@@ -1,10 +1,11 @@
 "use client"
 
-import React, { useMemo, useRef, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ImageIcon, Send, PlusCircle, Paperclip } from "lucide-react"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { ImageIcon, Send, PlusCircle, Paperclip, Square, RectangleVertical, RectangleHorizontal } from "lucide-react"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { useApp } from "@/components/app-context"
 
 // Types matching the API route logs
 // Minimal chat message + conversation types
@@ -70,14 +71,18 @@ export function ChatView() {
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const autoRanRef = useRef(false)
 
-  // Dimension selector state
+  // Pending handoff from HomeView
+  const { pendingPrompt, setPendingPrompt, pendingFiles, setPendingFiles } = useApp()
+
+  // Platform selector state
   const [selectedVariants, setSelectedVariants] = useState<string[]>(["square", "portrait"]) // defaults
   const variantOptions: Record<string, { label: string; width: number; height: number }> = {
-    square: { label: "Square 1:1", width: 1080, height: 1080 },
-    portrait: { label: "Portrait 4:5", width: 1080, height: 1350 },
-    landscape: { label: "Landscape 16:9", width: 1920, height: 1080 },
-    story: { label: "Story 9:16", width: 1080, height: 1920 },
+    square: { label: "Instagram (Square)", width: 1080, height: 1080 },
+    portrait: { label: "Instagram", width: 1080, height: 1350 },
+    landscape: { label: "YouTube", width: 1920, height: 1080 },
+    story: { label: "Instagram Stories", width: 1080, height: 1920 },
   }
 
   const [conversations, setConversations] = useState<Conversation[]>([
@@ -129,6 +134,10 @@ export function ChatView() {
       }))
       if (sizes.length > 0) form.append("sizes", JSON.stringify(sizes))
 
+      // Include full past context for this chat (role + content only)
+      const historyPayload = [...activeConv.messages, userMsg].map((m) => ({ role: m.role, content: m.content }))
+      form.append("history", JSON.stringify(historyPayload))
+
       const res = await fetch("/api/pipeline/run", { method: "POST", body: form })
       if (!res.ok) {
         const t = await res.text().catch(() => "")
@@ -136,14 +145,7 @@ export function ChatView() {
       }
       const json = (await res.json()) as PipelineResponse
 
-      const textParts: string[] = []
-      if (json.copy_best) {
-        textParts.push(
-          `Headline: ${json.copy_best.headline}\n${json.copy_best.subheadline}\nCTA: ${json.copy_best.cta}`,
-        )
-      } else if (json.copy_variants?.length) {
-        textParts.push(`Generated ${json.copy_variants.length} copy variants.`)
-      }
+      // We no longer include textual copy in chat output – images only
 
       // Select exactly one JPG per variant (aspect ratio) and order them
       const order = ["square", "portrait", "landscape", "story"]
@@ -168,7 +170,7 @@ export function ChatView() {
       const assistantMsg: ChatMessage = {
         id: `m_${Date.now() + 1}`,
         role: "assistant",
-        content: textParts.join("\n\n") || "Generated.",
+        content: "",
         timestamp: new Date().toISOString(),
         attachments: attachments.length ? attachments : undefined,
       }
@@ -190,6 +192,26 @@ export function ChatView() {
     }
   }
 
+  // Auto-ingest pending data handed off from Home and send once
+  useEffect(() => {
+    if (autoRanRef.current) return
+    const hasPending = !!pendingPrompt || (pendingFiles && pendingFiles.length > 0)
+    if (!hasPending) return
+    autoRanRef.current = true
+    ;(async () => {
+      const firstFile = pendingFiles?.[0] || null
+      setPrompt(pendingPrompt || "")
+      setImageFile(firstFile)
+      // allow state to commit before sending
+      await new Promise((r) => setTimeout(r, 0))
+      await handleSend()
+      // clear pending
+      setPendingPrompt("")
+      setPendingFiles([])
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPrompt, pendingFiles])
+
   return (
     <div className="h-[75vh] bg-zinc-950/60 border border-zinc-900 rounded-2xl overflow-hidden flex">
       {/* Left: Conversations */}
@@ -199,70 +221,91 @@ export function ChatView() {
             <PlusCircle className="w-4 h-4 mr-2" /> New chat
           </Button>
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {conversations.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setActiveId(c.id)}
-              className={`w-full text-left px-3 py-2 hover:bg-zinc-900/60 ${c.id === activeId ? "bg-zinc-900/60" : ""}`}
-            >
-              <div className="truncate text-sm text-zinc-200">{c.title || "Untitled"}</div>
-              <div className="text-xs text-zinc-500">{c.messages.length} messages</div>
-            </button>
-          ))}
-        </div>
+        <ScrollArea className="flex-1">
+          <div>
+            {conversations.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setActiveId(c.id)}
+                className={`w-full text-left px-3 py-2 hover:bg-zinc-900/60 ${c.id === activeId ? "bg-zinc-900/60" : ""}`}
+              >
+                <div className="truncate text-sm text-zinc-200">{c.title || "Untitled"}</div>
+                <div className="text-xs text-zinc-500">{c.messages.length} messages</div>
+              </button>
+            ))}
+          </div>
+        </ScrollArea>
       </aside>
 
       {/* Right: Chat */}
       <section className="flex-1 flex flex-col">
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {activeConv.messages.length === 0 && (
-            <div className="text-center text-zinc-500 mt-10">Start by typing a prompt or attaching an image.</div>
-          )}
-          {activeConv.messages.map((m) => (
-            <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`max-w-[80%] rounded-2xl px-4 py-3 border ${m.role === "user" ? "bg-zinc-900/60 border-zinc-800" : "bg-black/60 border-zinc-900"}`}>
-                <div className="whitespace-pre-wrap text-zinc-200">{m.content}</div>
-                {m.attachments && m.attachments.length > 0 && (
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    {m.attachments.map((a, i) => (
-                      <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={a.url} alt="attachment" className="rounded-md border border-zinc-800 max-h-48 object-contain" />
-                      </a>
-                    ))}
-                  </div>
-                )}
+        <ScrollArea className="flex-1">
+          <div className="p-4 space-y-4">
+            {activeConv.messages.length === 0 && (
+              <div className="text-center text-zinc-500 mt-10">Start by typing a prompt or attaching an image.</div>
+            )}
+            {activeConv.messages.map((m) => (
+              <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[80%] rounded-2xl px-4 py-3 border ${m.role === "user" ? "bg-zinc-900/60 border-zinc-800" : "bg-black/60 border-zinc-900"}`}>
+                  {m.content?.trim() ? (
+                    <div className="whitespace-pre-wrap text-zinc-200">{m.content}</div>
+                  ) : null}
+                  {m.attachments && m.attachments.length > 0 && (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {m.attachments.map((a, i) => (
+                        <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={a.url} alt="attachment" className="rounded-md border border-zinc-800 max-h-48 object-contain" />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </ScrollArea>
 
         {/* Composer */}
         <div className="border-t border-zinc-900 p-3">
-          {/* Dimension selector */}
+          {/* Platform selector (intuitive cards) */}
           <div className="mb-2">
-            <div className="text-xs text-zinc-400 mb-1">Select output dimensions</div>
-            <ToggleGroup
-              type="multiple"
-              value={selectedVariants}
-              onValueChange={(v) => setSelectedVariants(Array.isArray(v) ? v : [])}
-              className="bg-zinc-900/50 border border-zinc-800 rounded-md"
-            >
-              <ToggleGroupItem value="square" className="px-3 py-2 text-xs">
-                {variantOptions.square.label}
-              </ToggleGroupItem>
-              <ToggleGroupItem value="portrait" className="px-3 py-2 text-xs">
-                {variantOptions.portrait.label}
-              </ToggleGroupItem>
-              <ToggleGroupItem value="landscape" className="px-3 py-2 text-xs">
-                {variantOptions.landscape.label}
-              </ToggleGroupItem>
-              <ToggleGroupItem value="story" className="px-3 py-2 text-xs">
-                {variantOptions.story.label}
-              </ToggleGroupItem>
-            </ToggleGroup>
+            <div className="text-xs text-zinc-400 mb-1">Select platforms</div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {(
+                [
+                  { key: "square", icon: Square, label: variantOptions.square.label, hint: "1:1" },
+                  { key: "portrait", icon: RectangleVertical, label: variantOptions.portrait.label, hint: "4:5" },
+                  { key: "landscape", icon: RectangleHorizontal, label: variantOptions.landscape.label, hint: "16:9" },
+                  { key: "story", icon: RectangleVertical, label: variantOptions.story.label, hint: "9:16" },
+                ] as const
+              ).map((opt) => {
+                const selected = selectedVariants.includes(opt.key)
+                const Icon = opt.icon
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    title={opt.label}
+                    onClick={() =>
+                      setSelectedVariants((prev) =>
+                        prev.includes(opt.key) ? prev.filter((k) => k !== opt.key) : [...prev, opt.key]
+                      )
+                    }
+                    className={`text-left rounded-xl border px-3 py-2 transition ${
+                      selected ? "border-indigo-500/50 bg-indigo-500/10" : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Icon className="w-4 h-4 text-zinc-300" />
+                      <div className="text-xs text-zinc-300 truncate">{opt.label}</div>
+                    </div>
+                    <div className="text-[10px] text-zinc-500 mt-0.5">{opt.hint}</div>
+                  </button>
+                )
+              })}
+            </div>
           </div>
           <form className="flex items-center gap-2" onSubmit={handleSend}>
             <input

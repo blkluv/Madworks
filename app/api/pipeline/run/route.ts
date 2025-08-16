@@ -15,6 +15,15 @@ export const runtime = "edge";
 
 const PIPELINE_URL = process.env.NEXT_PUBLIC_PIPELINE_URL || process.env.PIPELINE_URL || "http://localhost:8010";
 
+const TIMEOUTS = {
+  ingestAnalyze: 45_000,
+  copy: 90_000,
+  compose: 30_000,
+  render: 120_000,
+  qa: 30_000,
+  export: 30_000,
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -44,13 +53,24 @@ function logStep(logs: LogEntry[], step: string, status: LogEntry["status"], mes
   logs.push(entry);
 }
 
-async function fetchJson(url: string, init?: RequestInit) {
-  const res = await fetch(url, init);
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`HTTP ${res.status} ${res.statusText} for ${url} -> ${txt}`);
+async function fetchJson(url: string, init?: RequestInit, timeoutMs: number = 60_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...(init || {}), signal: controller.signal });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status} ${res.statusText} for ${url} -> ${txt}`);
+    }
+    return res.json();
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw new Error(`Timeout after ${timeoutMs}ms for ${url}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json();
 }
 
 export async function POST(req: Request) {
@@ -73,6 +93,7 @@ export async function POST(req: Request) {
   let crop_height = 1080;
   let imageFile: File | undefined;
   let sizes: Array<{ name?: string; width: number; height: number }> | null = null;
+  let history: Array<{ role: string; content: string }> | null = null;
 
   try {
     // Try to parse as multipart first
@@ -105,6 +126,17 @@ export async function POST(req: Request) {
           }
         } catch (_) {}
       }
+      const historyRaw = form.get("history");
+      if (historyRaw && typeof historyRaw === "string") {
+        try {
+          const parsedH = JSON.parse(historyRaw);
+          if (Array.isArray(parsedH)) {
+            history = parsedH
+              .map((h: any) => ({ role: String(h?.role || ""), content: String(h?.content || "") }))
+              .filter((h: any) => h.role && typeof h.content === "string");
+          }
+        } catch (_) {}
+      }
     } else {
       const json = await req.json().catch(() => ({}));
       prompt = String(json.prompt || "");
@@ -118,6 +150,11 @@ export async function POST(req: Request) {
         sizes = json.sizes
           .map((s: any) => ({ name: s?.name, width: Number(s?.width), height: Number(s?.height) }))
           .filter((s: any) => Number.isFinite(s.width) && Number.isFinite(s.height));
+      }
+      if (Array.isArray(json.history)) {
+        history = json.history
+          .map((h: any) => ({ role: String(h?.role || ""), content: String(h?.content || "") }))
+          .filter((h: any) => h.role && typeof h.content === "string");
       }
       // No image via JSON
     }
@@ -136,7 +173,7 @@ export async function POST(req: Request) {
     try {
       const f = new FormData();
       f.append("image", imageFile, imageFile.name || "upload.png");
-      analysis = await fetchJson(`${PIPELINE_URL}/ingest-analyze`, { method: "POST", body: f });
+      analysis = await fetchJson(`${PIPELINE_URL}/ingest-analyze`, { method: "POST", body: f }, TIMEOUTS.ingestAnalyze);
       logStep(logs, "ingest_analyze", "ok", "Image analyzed", { mask_url: analysis?.mask_url }, Date.now() - t0);
     } catch (e) {
       ok = false; // non-fatal, can proceed without analysis
@@ -152,18 +189,22 @@ export async function POST(req: Request) {
   try {
     const copyPayload = {
       copy_instructions: prompt,
-      facts: {},
+      facts: history ? { history } : {},
       constraints: undefined,
       num_variants,
       temperature,
       tone,
       platform,
     };
-    copy = await fetchJson(`${PIPELINE_URL}/copy`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(copyPayload),
-    });
+    copy = await fetchJson(
+      `${PIPELINE_URL}/copy`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(copyPayload),
+      },
+      TIMEOUTS.copy,
+    );
     logStep(logs, "copy", "ok", "Copy generated", { variant_count: copy?.variants?.length || 1 }, Date.now() - t1);
   } catch (e) {
     ok = false;
@@ -190,22 +231,30 @@ export async function POST(req: Request) {
         analysis: analysis || {},
         crop_info: { width: s.width, height: s.height },
       };
-      const comp = await fetchJson(`${PIPELINE_URL}/compose`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(composePayload),
-      });
+      const comp = await fetchJson(
+        `${PIPELINE_URL}/compose`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(composePayload),
+        },
+        TIMEOUTS.compose,
+      );
       if (!composition) composition = comp; // capture first for backward compat
       logStep(logs, `compose_${s.name}`, "ok", "SVG composed", { composition_id: comp?.composition_id }, Date.now() - t2);
 
       const t3 = Date.now();
       logStep(logs, `render_${s.name}`, "start", `Rendering ${s.width}x${s.height}`);
       const renderPayload = { composition: comp, crop_info: { width: s.width, height: s.height }, job_id };
-      const r = await fetchJson(`${PIPELINE_URL}/render`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(renderPayload),
-      });
+      const r = await fetchJson(
+        `${PIPELINE_URL}/render`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(renderPayload),
+        },
+        TIMEOUTS.render,
+      );
       // Tag outputs with variant for client-side use
       const outs = (r?.outputs || []).map((o: any) => ({ ...o, variant: s.name }));
       combinedOutputs.push(...outs);
@@ -228,11 +277,15 @@ export async function POST(req: Request) {
       copy,
       render: renderRes,
     };
-    qaRes = await fetchJson(`${PIPELINE_URL}/qa`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(qaPayload),
-    });
+    qaRes = await fetchJson(
+      `${PIPELINE_URL}/qa`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(qaPayload),
+      },
+      TIMEOUTS.qa,
+    );
     logStep(logs, "qa", "ok", "QA completed", { ok: qaRes?.ok }, Date.now() - t4);
   } catch (e) {
     ok = false;
@@ -248,11 +301,15 @@ export async function POST(req: Request) {
       job_id,
       timestamp: nowIso(),
     };
-    exportRes = await fetchJson(`${PIPELINE_URL}/export`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(exportPayload),
-    });
+    exportRes = await fetchJson(
+      `${PIPELINE_URL}/export`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(exportPayload),
+      },
+      TIMEOUTS.export,
+    );
     logStep(logs, "export", "ok", "Export completed", { manifest_url: exportRes?.manifest_url }, Date.now() - t5);
   } catch (e) {
     ok = false;

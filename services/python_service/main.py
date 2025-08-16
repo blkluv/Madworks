@@ -53,7 +53,7 @@ app = FastAPI(title="Madworks AI Pipeline", version="1.1.0")
 # Storage config: support S3 (MinIO) and local static file storage for easier dev/testing
 STORAGE_MODE = os.getenv('STORAGE_MODE', 's3').lower()  # 's3' or 'local'
 STORAGE_DIR = os.getenv('STORAGE_DIR', str(Path(__file__).resolve().parent / 'storage'))
-PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', 'http://localhost:8000').rstrip('/')
+PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', 'http://localhost:8010').rstrip('/')
 
 # Ensure local storage directory exists and mount when in local mode
 try:
@@ -355,22 +355,26 @@ def _wrap_text(text: str, max_chars: int) -> List[str]:
     return lines or [""]
 
 def _try_build_data_url_from_storage(original_url: str) -> Optional[str]:
-    """If the URL points to our mounted /static path in local mode, load bytes directly
-    from STORAGE_DIR and return a data URL. Returns None on failure."""
+    """If the URL points to our mounted static paths, load bytes directly
+    from STORAGE_DIR and return a data URL. Supports /static, /outputs, /assets.
+    Returns None on failure."""
     try:
         if not original_url:
             return None
         p = urlparse(original_url)
         path = p.path or ""
-        if path.startswith("/static/"):
-            rel_path = path[len("/static/"):]
-            file_path = Path(STORAGE_DIR) / rel_path
-            if file_path.exists():
-                data = file_path.read_bytes()
-                mime, _ = mimetypes.guess_type(str(file_path))
-                mime = mime or "image/png"
-                b64 = base64.b64encode(data).decode("ascii")
-                return f"data:{mime};base64,{b64}"
+        prefixes = ["/static/", "/outputs/", "/assets/"]
+        for prefix in prefixes:
+            if path.startswith(prefix):
+                rel_path = path[len(prefix):]
+                file_path = Path(STORAGE_DIR) / rel_path
+                if file_path.exists():
+                    data = file_path.read_bytes()
+                    mime, _ = mimetypes.guess_type(str(file_path))
+                    mime = mime or "image/png"
+                    b64 = base64.b64encode(data).decode("ascii")
+                    return f"data:{mime};base64,{b64}"
+                break
     except Exception as e:
         logger.warning(f"Failed to build data URL from storage: {e}")
     return None
@@ -472,7 +476,7 @@ def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], 
 
         <!-- Background -->
         {% if original_url %}
-        <image href="{{ original_url }}" xlink:href="{{ original_url }}" x="0" y="0" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"/>
+        <image xlink:href="{{ original_url }}" x="0" y="0" width="{{ width }}" height="{{ height }}" preserveAspectRatio="xMidYMid slice"/>
         <!-- Legibility gradient overlay -->
         <rect width="100%" height="100%" fill="url(#shade)" />
         {% else %}
@@ -504,6 +508,14 @@ def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], 
 
     template = Template(svg_template)
     img_href = _resolve_img_href(analysis)
+    try:
+        logger.info(
+            "compose: using image href len=%s prefix=%s",
+            (len(img_href) if img_href else 0),
+            ((img_href[:32] + "...") if img_href and len(img_href) > 35 else (img_href or "")),
+        )
+    except Exception:
+        pass
     svg_content = template.render(
         width=width,
         height=height,
@@ -581,8 +593,47 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
     svg_url, _ = _upload_bytes(outputs_bucket, svg_key, svg_content.encode('utf-8'), 'image/svg+xml')
     outputs.append(RenderOutput(format="svg", width=width, height=height, url=svg_url))
 
-    # 2) Render SVG -> PNG bytes using CairoSVG
-    png_bytes = cairosvg.svg2png(bytestring=svg_content.encode('utf-8'), output_width=width, output_height=height)
+    # 2) Render SVG -> PNG bytes using CairoSVG with a robust URL fetcher
+    def _cairo_url_fetcher(url: str, *_, **__):
+        try:
+            if not url:
+                return {"string": b"", "mime_type": "application/octet-stream"}
+            if url.startswith("data:"):
+                header, data_part = url.split(",", 1)
+                mime = header[5:].split(";")[0] or "application/octet-stream"
+                if ";base64" in header:
+                    raw = base64.b64decode(data_part)
+                else:
+                    raw = data_part.encode("utf-8")
+                return {"string": raw, "mime_type": mime}
+
+            parsed = urlparse(url)
+            path = parsed.path or ""
+            # Map local static endpoints to disk
+            for prefix in ("/static/", "/outputs/", "/assets/"):
+                if path.startswith(prefix):
+                    rel_path = path[len(prefix):]
+                    file_path = Path(STORAGE_DIR) / rel_path
+                    if file_path.exists():
+                        mime, _ = mimetypes.guess_type(str(file_path))
+                        return {"file_obj": open(file_path, "rb"), "mime_type": mime or "application/octet-stream"}
+                    break
+
+            # Fallback: HTTP(S) fetch
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            mime = resp.headers.get("Content-Type", "application/octet-stream")
+            return {"string": resp.content, "mime_type": mime}
+        except Exception as e:
+            logger.warning(f"CairoSVG url_fetcher failed for {url}: {e}")
+            return {"string": b"", "mime_type": "application/octet-stream"}
+
+    png_bytes = cairosvg.svg2png(
+        bytestring=svg_content.encode('utf-8'),
+        output_width=width,
+        output_height=height,
+        unsafe=True,
+    )
     logger.info(f"Rendered PNG bytes: {len(png_bytes)}")
 
     # Upload PNG

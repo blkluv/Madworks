@@ -23,10 +23,10 @@ export function HomeChatBox() {
     }
     setPendingFiles(files)
     setPendingPrompt(prompt)
-    // switch to upload view by navigating to hash that app/page uses
+    // Seamlessly navigate to Chat view where the pending data will auto-run
     window.scrollTo({ top: 0, behavior: "smooth" })
-    const uploadTab = document.querySelector('[data-nav="upload"]') as HTMLElement | null
-    uploadTab?.click()
+    const chatTab = document.querySelector('[data-nav="chat"]') as HTMLElement | null
+    chatTab?.click()
   }
 
   return (
