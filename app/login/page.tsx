@@ -9,7 +9,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100 flex items-center justify-center px-4">
+    <div className="min-h-screen text-zinc-100 flex items-center justify-center px-4">
       <div className="w-full max-w-md bg-zinc-950/80 border border-zinc-900 rounded-3xl p-8 backdrop-blur">
         <div className="flex items-center gap-3 mb-6">
           <div className="p-3 bg-gradient-to-br from-indigo-600 via-pink-600 to-orange-500 rounded-xl shadow-lg shadow-indigo-600/25">

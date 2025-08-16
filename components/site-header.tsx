@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle } from "lucide-react"
-import { useState } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useSession } from "next-auth/react"
 
 type ViewType = "home" | "projects" | "gallery" | "premium" | "chat"
@@ -11,6 +11,19 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
   const [showAccountDropdown, setShowAccountDropdown] = useState(false)
   const { data: session, status } = useSession()
   const isAuthed = status === 'authenticated'
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowAccountDropdown(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
   const goto = (view: ViewType) => {
     if (onNavChange) onNavChange(view)
     else window.location.href = `/?view=${view}`
@@ -84,7 +97,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             >
               <Crown className="w-4 h-4 mr-2" /> Upgrade
             </Button>
-            <div className="relative">
+            <div className="relative" ref={dropdownRef}>
               <Button
                 size="icon"
                 onClick={() => {
@@ -98,7 +111,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
               >
                 {isAuthed && session?.user?.image ? (
                   // Show Google user avatar in a fixed-size circular frame
-                  <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-white/90 shadow shrink-0">
+                  <div className="w-10 h-10 rounded-full overflow-hidden shadow">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={session.user.image}
@@ -110,22 +123,67 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   <User className="w-5 h-5" />
                 )}
               </Button>
-              {showAccountDropdown && (
-                <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 w-56 bg-zinc-950/95 backdrop-blur rounded-xl shadow border border-zinc-800 py-1 px-1">
-                  <Button onClick={() => (window.location.href = "/profile")} className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
-                    <UserCircle className="w-4 h-4 mr-2" /> View Profile
-                  </Button>
-                  <Button onClick={() => (window.location.href = "/preferences")} className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
-                    <User className="w-4 h-4 mr-2" /> Generative Preferences
-                  </Button>
-                  <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
-                    <HelpCircle className="w-4 h-4 mr-2" /> FAQ
-                  </Button>
-                  <Button className="w-full text-left px-3 py-2 text-zinc-300 hover:bg-zinc-900 bg-transparent rounded-lg justify-start">
-                    <Settings className="w-4 h-4 mr-2" /> Settings
-                  </Button>
-                </div>
-              )}
+              <div 
+                className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-56 bg-zinc-950/95 backdrop-blur rounded-xl shadow-lg border border-zinc-800 overflow-hidden transition-all duration-200 ease-out origin-top ${
+                  showAccountDropdown 
+                    ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' 
+                    : 'opacity-0 scale-95 -translate-y-2 pointer-events-none'
+                }`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {isAuthed ? (
+                  <>
+                    <div className="p-4 border-b border-zinc-800">
+                      <p className="font-medium text-white">{session?.user?.name || 'User'}</p>
+                      <p className="text-xs text-zinc-400 truncate">{session?.user?.email}</p>
+                    </div>
+                    <div className="py-1">
+                      <Button 
+                        onClick={() => window.location.href = "/profile"} 
+                        className="w-full text-left px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-900/80 bg-transparent rounded-none justify-start"
+                      >
+                        <UserCircle className="w-4 h-4 mr-3 text-zinc-400" /> 
+                        View Profile
+                      </Button>
+                      <Button 
+                        onClick={() => window.location.href = "/settings"}
+                        className="w-full text-left px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-900/80 bg-transparent rounded-none justify-start"
+                      >
+                        <Settings className="w-4 h-4 mr-3 text-zinc-400" /> 
+                        Settings
+                      </Button>
+                      <Button 
+                        className="w-full text-left px-4 py-2.5 text-sm text-zinc-200 hover:bg-zinc-900/80 bg-transparent rounded-none justify-start"
+                      >
+                        <HelpCircle className="w-4 h-4 mr-3 text-zinc-400" /> 
+                        Help & Support
+                      </Button>
+                    </div>
+                    <div className="p-2 border-t border-zinc-800">
+                      <Button 
+                        variant="outline"
+                        className="w-full text-sm bg-transparent hover:bg-zinc-900/50 border-zinc-800 text-zinc-200 hover:text-white"
+                        onClick={() => {
+                          // Handle sign out
+                          window.location.href = '/api/auth/signout';
+                        }}
+                      >
+                        Sign Out
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-4">
+                    <p className="text-sm text-zinc-300 mb-3">Sign in to access your account</p>
+                    <Button 
+                      onClick={() => window.location.href = '/login'}
+                      className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white"
+                    >
+                      Sign In
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

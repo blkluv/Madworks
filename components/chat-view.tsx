@@ -77,19 +77,19 @@ export function ChatView() {
   // Pending handoff from HomeView
   const { pendingPrompt, setPendingPrompt, pendingFiles, setPendingFiles } = useApp()
 
-  // Platform selector state
-  const [selectedVariants, setSelectedVariants] = useState<string[]>(["square", "portrait"]) // defaults
+  // Aspect ratio selector state
+  const [selectedVariants, setSelectedVariants] = useState<string[]>(["3:4"]) // Default to 3:4
   const variantOptions: Record<string, { label: string; width: number; height: number }> = {
-    square: { label: "Instagram (Square)", width: 1080, height: 1080 },
-    portrait: { label: "Instagram", width: 1080, height: 1350 },
-    landscape: { label: "YouTube", width: 1920, height: 1080 },
-    story: { label: "Instagram Stories", width: 1080, height: 1920 },
+    '3:4': { label: "3:4 (Default)", width: 1080, height: 1440 },
+    '1:1': { label: "1:1 (Square)", width: 1080, height: 1080 },
+    '9:16': { label: "9:16 (Reels)", width: 1080, height: 1920 },
+    '16:9': { label: "16:9 (Landscape)", width: 1920, height: 1080 },
   }
-  const variantShortLabel: Record<string, string> = {
-    square: "Square",
-    portrait: "Instagram",
-    landscape: "YouTube",
-    story: "Story",
+  const variantIcons: Record<string, React.ElementType> = {
+    '3:4': RectangleVertical,
+    '1:1': Square,
+    '9:16': RectangleVertical,
+    '16:9': RectangleHorizontal,
   }
 
   const [conversations, setConversations] = useState<Conversation[]>([
@@ -346,38 +346,43 @@ export function ChatView() {
         {/* Composer */}
         <div className="border-t border-zinc-900 p-3">
           {/* Platform selector (intuitive cards) */}
-          <div className="mb-2">
-            <div className="text-xs text-zinc-400 mb-1">Select platforms</div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {(
-                [
-                  { key: "square", icon: Square, label: variantOptions.square.label, hint: "1:1" },
-                  { key: "portrait", icon: RectangleVertical, label: variantOptions.portrait.label, hint: "4:5" },
-                  { key: "landscape", icon: RectangleHorizontal, label: variantOptions.landscape.label, hint: "16:9" },
-                  { key: "story", icon: RectangleVertical, label: variantOptions.story.label, hint: "9:16" },
-                ] as const
-              ).map((opt) => {
-                const selected = selectedVariants.includes(opt.key)
-                const Icon = opt.icon
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-sm font-medium text-zinc-300">Aspect Ratio</div>
+              <div className="text-xs text-zinc-500">
+                {selectedVariants.length} selected
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+              {Object.entries(variantOptions).map(([key, { label, width, height }]) => {
+                const selected = selectedVariants.includes(key)
+                const Icon = variantIcons[key]
+                const aspectRatio = `${width}:${height}`
                 return (
                   <button
-                    key={opt.key}
+                    key={key}
                     type="button"
-                    title={opt.label}
+                    title={label}
                     onClick={() =>
                       setSelectedVariants((prev) =>
-                        prev.includes(opt.key) ? prev.filter((k) => k !== opt.key) : [...prev, opt.key]
+                        prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
                       )
                     }
-                    className={`text-left rounded-xl border px-3 py-2 transition ${
-                      selected ? "border-indigo-500/50 bg-indigo-500/10" : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900"
+                    className={`text-left rounded-xl border transition-all duration-200 ${
+                      selected 
+                        ? "border-indigo-500/50 bg-indigo-500/10 ring-1 ring-indigo-500/30 shadow-md shadow-indigo-500/10" 
+                        : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900/70 hover:border-zinc-700"
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <Icon className="w-4 h-4 text-zinc-300" />
-                      <div className="text-xs text-zinc-300 truncate">{opt.label}</div>
+                      <div className="p-1.5 rounded-md bg-zinc-800/50">
+                        <Icon className="w-4 h-4 text-zinc-300" />
+                      </div>
+                      <div className="text-left">
+                        <div className="text-xs font-medium text-zinc-200">{label}</div>
+                        <div className="text-[10px] text-zinc-400">{width}×{height}</div>
+                      </div>
                     </div>
-                    <div className="text-[10px] text-zinc-500 mt-0.5">{opt.hint}</div>
                   </button>
                 )
               })}
