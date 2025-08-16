@@ -27,34 +27,58 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
 
           <div className="absolute left-1/2 transform -translate-x-1/2">
             <nav className="flex justify-center">
-              <div className="bg-zinc-950/80 backdrop-blur rounded-full p-2 shadow border border-zinc-900">
-                <div className="flex items-center gap-2">
-                  <Button data-nav="home" onClick={() => goto("home")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'home' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
-                    <Home className="w-4 h-4 mr-2" /> Home
-                  </Button>
-                  <Button data-nav="chat" onClick={() => goto("chat")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'chat' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
-                    {/* Reusing BookOpen icon for simplicity */}
-                    <BookOpen className="w-4 h-4 mr-2" /> Chat
-                  </Button>
-                  <Button data-nav="projects" onClick={() => goto("projects")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'projects' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
-                    <Folder className="w-4 h-4 mr-2" /> Projects
-                  </Button>
-                  <Button data-nav="gallery" onClick={() => goto("gallery")} className={`rounded-full px-6 py-3 font-semibold ${currentView === 'gallery' ? 'bg-white text-black' : 'bg-transparent text-zinc-200 hover:bg-zinc-900'}`}>
-                    <BookOpen className="w-4 h-4 mr-2" /> Premium Templates
-                  </Button>
-                </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  data-nav="home"
+                  onClick={() => goto("home")}
+                  variant="outline"
+                  size="lg"
+                  className={`rounded-xl px-6 py-3 font-semibold ${currentView === 'home' ? 'bg-black/70 text-white' : ''}`}
+                >
+                  <Home className="w-4 h-4 mr-2" /> Home
+                </Button>
+                <Button
+                  data-nav="chat"
+                  onClick={() => goto("chat")}
+                  variant="outline"
+                  size="lg"
+                  className={`rounded-xl px-6 py-3 font-semibold ${currentView === 'chat' ? 'bg-black/70 text-white' : ''}`}
+                >
+                  <BookOpen className="w-4 h-4 mr-2" /> Chat
+                </Button>
+                <Button
+                  data-nav="projects"
+                  onClick={() => goto("projects")}
+                  variant="outline"
+                  size="lg"
+                  className={`rounded-xl px-6 py-3 font-semibold ${currentView === 'projects' ? 'bg-black/70 text-white' : ''}`}
+                >
+                  <Folder className="w-4 h-4 mr-2" /> Projects
+                </Button>
+                <Button
+                  data-nav="gallery"
+                  onClick={() => goto("gallery")}
+                  variant="outline"
+                  size="lg"
+                  className={`rounded-xl px-6 py-3 font-semibold ${currentView === 'gallery' ? 'bg-black/70 text-white' : ''}`}
+                >
+                  <BookOpen className="w-4 h-4 mr-2" /> Premium Templates
+                </Button>
               </div>
             </nav>
           </div>
 
           <div className="flex items-center gap-2">
-            <Button onClick={() => (window.location.href = "/upgrade")} className="h-10 px-4 rounded-full">
+            <Button
+              onClick={() => (window.location.href = "/upgrade")}
+              className="h-10 px-4 rounded-xl bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 hover:from-indigo-700 hover:via-pink-700 hover:to-orange-600 text-white shadow-lg"
+            >
               <Crown className="w-4 h-4 mr-2" /> Upgrade
             </Button>
             <div className="relative">
               <Button
                 onClick={() => setShowAccountDropdown((s) => !s)}
-                className="h-12 w-12 bg-zinc-900 hover:bg-zinc-800 text-white rounded-full shadow border border-zinc-800 flex items-center justify-center"
+                className="h-12 w-12 bg-black/40 hover:bg-black/60 text-white rounded-full shadow border border-zinc-800 flex items-center justify-center"
               >
                 <User className="w-4 h-4" />
               </Button>

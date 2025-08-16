@@ -31,22 +31,24 @@ export function HomeChatBox() {
 
   return (
     <div className="rounded-3xl bg-zinc-950/70 border border-zinc-900 backdrop-blur p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-2">
-            <Button onClick={() => fileInputRef.current?.click()} className="rounded-full">
-              <PlusCircle className="w-4 h-4 mr-2" /> Add image
-            </Button>
-            <div className="text-xs text-zinc-400">JPG, PNG, WebP • Max 10MB</div>
-          </div>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe the ad you want (tone, facts, CTA). We never invent facts."
-            className="w-full p-4 min-h-20 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-200 placeholder-zinc-500"
-          />
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-2">
+          <Button onClick={() => fileInputRef.current?.click()} className="rounded-full">
+            <PlusCircle className="w-4 h-4 mr-2" /> Add image
+          </Button>
+          <div className="text-xs text-zinc-400">JPG, PNG, WebP • Max 10MB</div>
         </div>
-        <Button onClick={handleSubmit} disabled={files.length === 0} className="rounded-full px-6 py-3">
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Describe the ad you want (tone, facts, CTA). We never invent facts."
+          className="w-full p-4 min-h-24 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-200 placeholder-zinc-500"
+        />
+        <Button
+          onClick={handleSubmit}
+          disabled={files.length === 0}
+          className="rounded-2xl py-4 w-full bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 hover:from-indigo-700 hover:via-pink-700 hover:to-orange-600 text-white shadow-lg"
+        >
           <Send className="w-4 h-4 mr-2" /> Generate
         </Button>
       </div>

@@ -13,7 +13,7 @@ type ChatMessage = {
   id: string
   role: "user" | "assistant"
   content: string
-  attachments?: Array<{ type: "image"; url: string }>
+  attachments?: Array<{ type: "image"; url: string; variant?: string }>
   timestamp: string
 }
 
@@ -72,6 +72,7 @@ export function ChatView() {
   const [busy, setBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const autoRanRef = useRef(false)
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   // Pending handoff from HomeView
   const { pendingPrompt, setPendingPrompt, pendingFiles, setPendingFiles } = useApp()
@@ -83,6 +84,12 @@ export function ChatView() {
     portrait: { label: "Instagram", width: 1080, height: 1350 },
     landscape: { label: "YouTube", width: 1920, height: 1080 },
     story: { label: "Instagram Stories", width: 1080, height: 1920 },
+  }
+  const variantShortLabel: Record<string, string> = {
+    square: "Square",
+    portrait: "Instagram",
+    landscape: "YouTube",
+    story: "Story",
   }
 
   const [conversations, setConversations] = useState<Conversation[]>([
@@ -157,10 +164,10 @@ export function ChatView() {
           if (!byVariant.has(v)) byVariant.set(v, normalizeUrl(o.url))
         }
       }
-      const attachments: Array<{ type: "image"; url: string }> = []
+      const attachments: Array<{ type: "image"; url: string; variant?: string }> = []
       for (const v of order) {
         const url = byVariant.get(v)
-        if (url) attachments.push({ type: "image", url })
+        if (url) attachments.push({ type: "image", url, variant: v })
       }
       // Fallback: if no known variants, include whatever jpgs exist
       if (attachments.length === 0) {
@@ -212,16 +219,21 @@ export function ChatView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingPrompt, pendingFiles])
 
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [activeConv.messages.length])
+
   return (
-    <div className="h-[75vh] bg-zinc-950/60 border border-zinc-900 rounded-2xl overflow-hidden flex">
+    <div className="h-[75vh] min-h-0 bg-zinc-950/60 border border-zinc-900 rounded-2xl overflow-hidden flex">
       {/* Left: Conversations */}
-      <aside className="hidden md:flex w-64 lg:w-72 border-r border-zinc-900 flex-col">
+      <aside className="hidden md:flex w-64 lg:w-72 border-r border-zinc-900 flex-col min-h-0">
         <div className="p-3">
           <Button onClick={startNewChat} className="w-full rounded-lg">
             <PlusCircle className="w-4 h-4 mr-2" /> New chat
           </Button>
         </div>
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           <div>
             {conversations.map((c) => (
               <button
@@ -238,32 +250,96 @@ export function ChatView() {
       </aside>
 
       {/* Right: Chat */}
-      <section className="flex-1 flex flex-col">
+      <section className="flex-1 flex flex-col min-h-0">
         {/* Messages */}
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="p-4 space-y-4">
             {activeConv.messages.length === 0 && (
               <div className="text-center text-zinc-500 mt-10">Start by typing a prompt or attaching an image.</div>
             )}
-            {activeConv.messages.map((m) => (
-              <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] rounded-2xl px-4 py-3 border ${m.role === "user" ? "bg-zinc-900/60 border-zinc-800" : "bg-black/60 border-zinc-900"}`}>
-                  {m.content?.trim() ? (
-                    <div className="whitespace-pre-wrap text-zinc-200">{m.content}</div>
-                  ) : null}
-                  {m.attachments && m.attachments.length > 0 && (
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      {m.attachments.map((a, i) => (
-                        <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={a.url} alt="attachment" className="rounded-md border border-zinc-800 max-h-48 object-contain" />
-                        </a>
-                      ))}
+            {activeConv.messages.map((m) => {
+              const isUser = m.role === "user"
+              const hasAttachments = !!(m.attachments && m.attachments.length > 0)
+              return (
+                <div key={m.id} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+                  {isUser ? (
+                    <div className="max-w-[80%] rounded-2xl px-4 py-3 border bg-zinc-900/60 border-zinc-800">
+                      {m.content?.trim() ? (
+                        <div className="whitespace-pre-wrap text-zinc-200">{m.content}</div>
+                      ) : null}
+                      {hasAttachments && (
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          {m.attachments!.map((a, i) => (
+                            <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
+                              <img src={a.url} alt="attachment" className="rounded-md border border-zinc-800 max-h-48 object-contain" />
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : hasAttachments ? (
+                    <div className="w-full max-w-3xl">
+                      {(() => {
+                        const n = m.attachments!.length
+                        if (n === 1) {
+                          const a = m.attachments![0]
+                          return (
+                            <a href={a.url} target="_blank" rel="noreferrer" className="block group">
+                              <img src={a.url} alt="output" className="w-full max-h-[480px] object-contain rounded-2xl border border-zinc-800/70 bg-zinc-900/30 group-hover:bg-zinc-900/40 transition" />
+                            </a>
+                          )
+                        }
+                        if (n === 2) {
+                          return (
+                            <div className="grid grid-cols-2 gap-2">
+                              {m.attachments!.map((a, i) => (
+                                <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block group">
+                                  <img src={a.url} alt="output" className="w-full h-64 object-cover rounded-2xl border border-zinc-800/70 bg-zinc-900/30 group-hover:bg-zinc-900/40 transition" />
+                                </a>
+                              ))}
+                            </div>
+                          )
+                        }
+                        if (n === 3) {
+                          return (
+                            <div className="grid grid-cols-3 auto-rows-[140px] md:auto-rows-[180px] gap-2">
+                              {m.attachments!.map((a, i) => (
+                                <a
+                                  key={i}
+                                  href={a.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className={`block group ${i === 0 ? "col-span-2 row-span-2" : ""}`}
+                                >
+                                  <img src={a.url} alt="output" className="w-full h-full object-cover rounded-2xl border border-zinc-800/70 bg-zinc-900/30 group-hover:bg-zinc-900/40 transition" />
+                                </a>
+                              ))}
+                            </div>
+                          )
+                        }
+                        // 4 or more
+                        return (
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 auto-rows-[120px] md:auto-rows-[160px]">
+                            {m.attachments!.slice(0, 8).map((a, i) => (
+                              <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block group">
+                                <img src={a.url} alt="output" className="w-full h-full object-cover rounded-2xl border border-zinc-800/70 bg-zinc-900/30 group-hover:bg-zinc-900/40 transition" />
+                              </a>
+                            ))}
+                          </div>
+                        )
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="max-w-[80%] rounded-2xl px-4 py-3 border bg-zinc-900/40 border-zinc-800">
+                      {m.content?.trim() ? (
+                        <div className="whitespace-pre-wrap text-zinc-200">{m.content}</div>
+                      ) : null}
                     </div>
                   )}
                 </div>
-              </div>
-            ))}
+              )
+            })}
+            <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
 
