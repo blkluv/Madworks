@@ -4,6 +4,8 @@ import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 import { AppProvider } from '@/components/app-context'
 import { CreditsPill } from '@/components/credits-pill'
+import { AuthProvider } from '@/components/auth-provider'
+import { SiteHeader } from '@/components/site-header'
 
 export const metadata: Metadata = {
   title: 'v0 App',
@@ -27,11 +29,30 @@ html {
 }
         `}</style>
       </head>
-      <body className="bg-black text-zinc-100">
-        <AppProvider>
-          {children}
-          <CreditsPill />
-        </AppProvider>
+      <body className="text-zinc-100">
+        <AuthProvider>
+          <AppProvider>
+            <div className="relative min-h-screen">
+              {/* Global subtle background gradient (behind everything, including header) */}
+              <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+                {/* Subtle marble texture overlay */}
+                <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/20 via-pink-900/10 to-orange-900/20 opacity-30"></div>
+                {/* Flowing organic shapes */}
+                <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-gradient-to-br from-indigo-600/5 to-pink-600/5 rounded-full blur-3xl"></div>
+                <div className="absolute top-1/2 right-1/3 w-80 h-80 bg-gradient-to-br from-pink-600/5 to-orange-600/5 rounded-full blur-3xl"></div>
+                <div className="absolute bottom-1/4 left-1/3 w-[500px] h-[500px] bg-gradient-to-br from-orange-600/8 to-indigo-600/8 rounded-full blur-3xl"></div>
+                <div className="absolute bottom-1/6 right-1/4 w-[400px] h-[400px] bg-gradient-to-br from-indigo-600/8 to-pink-600/8 rounded-full blur-3xl"></div>
+                {/* Veining patterns */}
+                <div className="absolute inset-0 bg-gradient-to-br from-transparent via-indigo-500/2 to-transparent"></div>
+                <div className="absolute inset-0 bg-gradient-to-tl from-transparent via-pink-500/2 to-transparent"></div>
+              </div>
+
+              <SiteHeader />
+              {children}
+              <CreditsPill />
+            </div>
+          </AppProvider>
+        </AuthProvider>
       </body>
     </html>
   )

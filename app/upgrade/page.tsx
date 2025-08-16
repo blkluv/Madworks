@@ -4,12 +4,11 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Check, Crown, Sparkles } from "lucide-react"
 import { useRouter } from "next/navigation"
-import HomePage from "../page"
 
 export default function UpgradePage() {
   const router = useRouter()
   return (
-    <div className="min-h-screen bg-black text-zinc-100">
+    <div className="min-h-screen text-zinc-100">
       <div className="container mx-auto px-4 py-6">
         {/* Reuse the same header/menu from the homepage by rendering HomePage header-only would be complex; we keep global header from layout */}
         <div className="text-center mb-10">
