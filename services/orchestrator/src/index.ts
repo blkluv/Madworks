@@ -21,7 +21,7 @@ const pg = new Pool({
   port: Number(process.env.PGPORT || 5432),
 });
 
-const pyBase = process.env.PY_PIPELINE_BASE || 'http://localhost:8000';
+const pyBase = process.env.PY_PIPELINE_BASE || 'http://localhost:8010';
 
 async function updateStatus(jobId: string, status: string) {
   await pg.query('update jobs set status=$2, updated_at=now() where id=$1', [jobId, status]);

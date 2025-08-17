@@ -114,6 +114,26 @@ class RenderResult(BaseModel):
     outputs: List[RenderOutput]
     thumbnail_url: str
 
+# Structured copy schema
+class SpanRange(BaseModel):
+    start: int
+    end: int
+    style: str = "bold"  # e.g., bold, italic, highlight
+
+class FontRecommendation(BaseModel):
+    role: str  # "headline" | "body"
+    family: str
+    weight: int = 700
+    letter_spacing: float = 0.0
+    line_height: float = 1.1
+
+class CopyVariantStructured(BaseModel):
+    headline: str
+    subheadline: str
+    cta: str
+    emphasis_ranges: Dict[str, List[SpanRange]] = Field(default_factory=lambda: {"headline": [], "subheadline": []})
+    font_recommendations: List[FontRecommendation] = Field(default_factory=list)
+
 # Utility functions
 def extract_palette(image: Image.Image, num_colors: int = 5) -> List[str]:
     """Extract dominant colors from image"""
@@ -354,6 +374,75 @@ def _wrap_text(text: str, max_chars: int) -> List[str]:
         lines.append(" ".join(cur))
     return lines or [""]
 
+# Deterministic utilities for structured copy
+def recommend_fonts(tone: Optional[str], platform: Optional[str]) -> List[FontRecommendation]:
+    """Deterministic font recommendations based on tone/platform.
+    Keep this purely deterministic and commercial-safe.
+    """
+    t = (tone or "").strip().lower()
+    # Simple mapping; expand as needed
+    if t in ("bold", "confident", "sporty"):
+        return [
+            FontRecommendation(role="headline", family="Inter", weight=800, letter_spacing=0, line_height=1.05),
+            FontRecommendation(role="body", family="Inter", weight=500, letter_spacing=0, line_height=1.3),
+        ]
+    if t in ("professional", "minimal", "clean"):
+        return [
+            FontRecommendation(role="headline", family="Work Sans", weight=700, letter_spacing=0, line_height=1.08),
+            FontRecommendation(role="body", family="Work Sans", weight=400, letter_spacing=0, line_height=1.35),
+        ]
+    if t in ("friendly", "warm", "casual"):
+        return [
+            FontRecommendation(role="headline", family="DM Sans", weight=700, letter_spacing=0, line_height=1.1),
+            FontRecommendation(role="body", family="DM Sans", weight=400, letter_spacing=0, line_height=1.35),
+        ]
+    # Default
+    return [
+        FontRecommendation(role="headline", family="Inter", weight=800, letter_spacing=0, line_height=1.06),
+        FontRecommendation(role="body", family="Inter", weight=500, letter_spacing=0, line_height=1.32),
+    ]
+
+def _first_n_words_span(text: str, n: int = 2) -> Optional[SpanRange]:
+    text = text or ""
+    if not text:
+        return None
+    # Find char index at the end of the Nth word (simple whitespace split heuristic)
+    count = 0
+    in_word = False
+    for i, ch in enumerate(text):
+        if ch.isspace():
+            if in_word:
+                count += 1
+                in_word = False
+                if count >= n:
+                    return SpanRange(start=0, end=i, style="bold")
+        else:
+            in_word = True
+    # If string ends without trailing space, close last word
+    if in_word:
+        count += 1
+        if count >= n:
+            return SpanRange(start=0, end=len(text), style="bold")
+    # Fallback: emphasize entire text if fewer than n words
+    return SpanRange(start=0, end=len(text), style="bold")
+
+def compute_emphasis_ranges(headline: str, subheadline: str) -> Dict[str, List[SpanRange]]:
+    """Compute deterministic emphasis ranges.
+    - Headline: emphasize first 2 words.
+    - Subheadline: emphasize first numeric token if present (e.g., 20%, 2x, 2025).
+    """
+    import re
+    h_span = _first_n_words_span(headline or "", 2)
+    subs: List[SpanRange] = []
+    if subheadline:
+        m = re.search(r"\d[\d\w%\.]*", subheadline)
+        if m:
+            subs.append(SpanRange(start=m.start(), end=m.end(), style="bold"))
+    return {
+        "headline": [h_span] if h_span else [],
+        "subheadline": subs,
+    }
+
 def _try_build_data_url_from_storage(original_url: str) -> Optional[str]:
     """If the URL points to our mounted static paths, load bytes directly
     from STORAGE_DIR and return a data URL. Supports /static, /outputs, /assets.
@@ -405,11 +494,10 @@ def _resolve_img_href(analysis: Dict[str, Any]) -> str:
                 logger.warning(f"HTTP fetch failed for original image: {e}")
     return ""
 
-def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], crop_info: Dict[str, Any]) -> str:
-    """Create SVG composition with a fixed, professional layout:
+def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any]) -> str:
+    """Create SVG composition with a fixed, professional layout and support for emphasis tspans.
     - Full-bleed background image with strong legibility gradient
-    - Left-aligned bold white headline
-    - Left-aligned supporting copy below
+    - Left-aligned headline and subheadline with optional emphasis ranges rendered as bold tspans
     - Bottom-left CTA button
     """
 
@@ -423,8 +511,36 @@ def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], 
     sub_size = max(18, int(min(width, height) * 0.035))
     text_color = "#ffffff"
     text_color_secondary = "#e5e5e5"
-    font_family = "Inter, Roboto, Arial, sans-serif"
-    letter_spacing = 0  # tweakable
+
+    # Recommended fonts from structured copy (backward compatible)
+    # Defaults
+    default_stack = "Inter, Roboto, Arial, sans-serif"
+    font_family_headline = default_stack
+    font_family_body = default_stack
+    headline_weight = 800
+    body_weight = 500
+    headline_letter_spacing = 0
+    body_letter_spacing = 0
+
+    try:
+        recs = copy_data.get("font_recommendations") or []
+        # Expect roles: headline, body
+        for r in recs:
+            role = (r.get("role") or "").lower()
+            fam = (r.get("family") or "").strip()
+            if role == "headline":
+                if fam:
+                    font_family_headline = f"{fam}, {default_stack}"
+                headline_weight = int(r.get("weight", headline_weight))
+                headline_letter_spacing = float(r.get("letter_spacing", headline_letter_spacing))
+            elif role == "body":
+                if fam:
+                    font_family_body = f"{fam}, {default_stack}"
+                body_weight = int(r.get("weight", body_weight))
+                body_letter_spacing = float(r.get("letter_spacing", body_letter_spacing))
+    except Exception:
+        # Ignore malformed recs
+        pass
 
     # CTA sizing and placement (bottom-left)
     cta_text = copy_data.get("cta", "Learn More")
@@ -448,12 +564,67 @@ def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], 
     headline_lines = _wrap_text(headline, max_chars_headline)
     sub_lines = _wrap_text(subheadline, max_chars_sub)
 
+    # Build segment lines from emphasis ranges
+    def _segments_by_line(full_text: str, lines: List[str], ranges: List[Dict[str, Any]]):
+        # ranges: [{start, end, style}]
+        try:
+            norm_ranges = []
+            for r in (ranges or []):
+                try:
+                    s = int(r.get("start", 0))
+                    e = int(r.get("end", 0))
+                    if e > s:
+                        norm_ranges.append({"start": s, "end": e, "style": (r.get("style") or "bold")})
+                except Exception:
+                    continue
+            norm_ranges.sort(key=lambda x: (x["start"], x["end"]))
+
+            seg_lines: List[List[Dict[str, Any]]] = []
+            cursor = 0
+            for line in lines:
+                # find this line's start index in full_text starting from cursor to be stable
+                idx = full_text.find(line, cursor)
+                if idx == -1:
+                    idx = cursor  # fallback best-effort
+                line_start = idx
+                line_end = idx + len(line)
+                cursor = line_end
+
+                # collect overlapping ranges
+                overlaps = [r for r in norm_ranges if not (r["end"] <= line_start or r["start"] >= line_end)]
+                # Build segments in order
+                segs: List[Dict[str, Any]] = []
+                pos = line_start
+                for r in overlaps:
+                    s = max(line_start, r["start"]) ; e = min(line_end, r["end"]) ; s = max(s, pos)
+                    if s > pos:
+                        segs.append({"text": full_text[pos:s], "style": "normal"})
+                    if e > s:
+                        segs.append({"text": full_text[s:e], "style": r.get("style") or "bold"})
+                        pos = e
+                if pos < line_end:
+                    segs.append({"text": full_text[pos:line_end], "style": "normal"})
+                # If no overlaps, add the whole line as normal
+                if not overlaps and not segs:
+                    segs = [{"text": line, "style": "normal"}]
+                seg_lines.append(segs)
+            return seg_lines
+        except Exception:
+            # Fallback: each line as a single normal segment
+            return [[{"text": ln, "style": "normal"}] for ln in lines]
+
+    em = copy_data.get("emphasis_ranges") or {}
+    headline_ranges = em.get("headline") or []
+    sub_ranges = em.get("subheadline") or []
+    headline_segments = _segments_by_line(headline, headline_lines, headline_ranges)
+    sub_segments = _segments_by_line(subheadline, sub_lines, sub_ranges)
+
     # Vertical rhythm: headline near upper-left, sub below, CTA at bottom-left
     line_gap = int(headline_size * 0.28)
     sub_gap = int(sub_size * 0.24)
     headline_y_start = padding + headline_size  # first baseline
     # compute block height for headline
-    headline_block_h = len(headline_lines) * headline_size + (len(headline_lines) - 1) * line_gap
+    headline_block_h = len(headline_segments) * headline_size + (len(headline_segments) - 1) * line_gap
     subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
 
     # SVG template with legibility gradient (applied only when an image exists) and a clean fallback background
@@ -485,23 +656,31 @@ def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], 
 
         <!-- Content -->
         <g>
-            <!-- Headline -->
-            <text x="{{ padding }}" y="{{ headline_y_start }}" font-family="{{ font_family }}" font-size="{{ headline_size }}" font-weight="800" fill="{{ text_color }}" letter-spacing="{{ letter_spacing }}" filter="url(#shadow)">
-                {% for line in headline_lines %}
-                <tspan x="{{ padding }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">{{ line }}</tspan>
+            <!-- Headline with emphasis tspans -->
+            <text x="{{ padding }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{{ text_color }}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)">
+                {% for line in headline_segments %}
+                <tspan x="{{ padding }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">
+                    {% for seg in line %}
+                    <tspan{% if seg.style == 'bold' %} font-weight="800"{% endif %}>{{ seg.text | e }}</tspan>
+                    {% endfor %}
+                </tspan>
                 {% endfor %}
             </text>
 
             <!-- Subheadline -->
-            <text x="{{ padding }}" y="{{ subheadline_y_start }}" font-family="{{ font_family }}" font-size="{{ sub_size }}" font-weight="500" fill="{{ text_color_secondary }}" letter-spacing="0" filter="url(#shadow)">
-                {% for line in sub_lines %}
-                <tspan x="{{ padding }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">{{ line }}</tspan>
+            <text x="{{ padding }}" y="{{ subheadline_y_start }}" font-family="{{ font_family_body }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" filter="url(#shadow)">
+                {% for line in sub_segments %}
+                <tspan x="{{ padding }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">
+                    {% for seg in line %}
+                    <tspan{% if seg.style == 'bold' %} font-weight="700"{% endif %}>{{ seg.text | e }}</tspan>
+                    {% endfor %}
+                </tspan>
                 {% endfor %}
             </text>
 
             <!-- CTA Button -->
             <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="10" fill="{{ cta_color }}" filter="url(#shadow)"/>
-            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta }}</text>
+            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta }}</text>
         </g>
     </svg>
     """
@@ -520,13 +699,14 @@ def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], 
         width=width,
         height=height,
         padding=padding,
-        font_family=font_family,
+        font_family_headline=font_family_headline,
+        font_family_body=font_family_body,
         text_color=text_color,
         text_color_secondary=text_color_secondary,
         headline_size=headline_size,
         sub_size=sub_size,
-        headline_lines=headline_lines,
-        sub_lines=sub_lines,
+        headline_segments=headline_segments,
+        sub_segments=sub_segments,
         line_gap=line_gap,
         sub_gap=sub_gap,
         headline_y_start=headline_y_start,
@@ -538,7 +718,11 @@ def create_svg_composition(copy_data: Dict[str, str], analysis: Dict[str, Any], 
         cta_text_x=cta_text_x,
         cta_text_y=cta_text_y,
         cta=cta_text,
-        letter_spacing=letter_spacing,
+        headline_letter_spacing=headline_letter_spacing,
+        body_letter_spacing=body_letter_spacing,
+        headline_weight=headline_weight,
+        body_weight=body_weight,
+        cta_color=cta_color,
         original_url=img_href,
         int=int,
     )
@@ -736,7 +920,7 @@ async def copy_gen(payload: CopyInput):
     """Stage 3: Copy generation using AI"""
     try:
         # Generate copy variants using OpenAI (first variant returned for backward compatibility)
-        variants = await generate_copy_with_ai(
+        raw_variants = await generate_copy_with_ai(
             payload.copy_instructions,
             payload.facts,
             payload.constraints,
@@ -748,16 +932,42 @@ async def copy_gen(payload: CopyInput):
             num_variants=payload.num_variants,
         )
 
-        best = variants[0] if variants else {
+        # Fallback best
+        best_fallback = {
             "headline": "Professional Excellence",
             "subheadline": "Quality that delivers results",
-            "cta": (payload.constraints.allowed_cta[0] if payload and payload.constraints else "Learn More")
+            "cta": (payload.constraints.allowed_cta[0] if payload and payload.constraints else "Learn More"),
         }
-        # Include all variants for clients that can use them; orchestrator will ignore extra fields
-        best_with_variants = dict(best)
-        best_with_variants["variants"] = variants
-        return best_with_variants
-        
+
+        # Deterministic fonts shared across variants for this request
+        fonts = [f.dict() for f in recommend_fonts(payload.tone, payload.platform)]
+
+        # Enrich each variant with emphasis ranges and font recommendations
+        enriched_variants: List[Dict[str, Any]] = []
+        for v in (raw_variants or [])[: max(1, int(payload.num_variants))]:
+            em = compute_emphasis_ranges(v.get("headline", ""), v.get("subheadline", ""))
+            enriched = dict(v)
+            enriched["emphasis_ranges"] = {k: [r.dict() for r in vlist] for k, vlist in em.items()}
+            enriched["font_recommendations"] = fonts
+            enriched_variants.append(enriched)
+
+        if not enriched_variants:
+            em = compute_emphasis_ranges(best_fallback["headline"], best_fallback["subheadline"])
+            enriched_variants = [
+                {
+                    **best_fallback,
+                    "emphasis_ranges": {k: [r.dict() for r in vlist] for k, vlist in em.items()},
+                    "font_recommendations": fonts,
+                }
+            ]
+
+        # Backward-compatible shape: return best fields at top-level and include variants array
+        best = enriched_variants[0]
+        response = dict(best)
+        response["variants"] = enriched_variants
+        response["schema_version"] = "1.0"
+        return response
+
     except Exception as e:
         logger.error(f"Error in copy generation: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -912,4 +1122,4 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8010)
