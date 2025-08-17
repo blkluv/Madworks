@@ -6,7 +6,8 @@ import { Filter, Search, Heart, Download, BookOpen } from "lucide-react"
 import { useState } from "react"
 import { useApp } from "./app-context"
 
-const mockSavedTemplates = []
+type SavedTemplate = { title: string; category: string }
+const mockSavedTemplates: SavedTemplate[] = []
 
 export function GalleryView() {
   const { gallery } = useApp()

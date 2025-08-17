@@ -137,6 +137,13 @@ export async function POST(req: Request) {
           }
         } catch (_) {}
       }
+      const analysisRaw = form.get("analysis");
+      if (analysisRaw && typeof analysisRaw === "string") {
+        try {
+          const parsedA = JSON.parse(analysisRaw);
+          if (parsedA && typeof parsedA === "object") analysis = parsedA;
+        } catch (_) {}
+      }
     } else {
       const json = await req.json().catch(() => ({}));
       prompt = String(json.prompt || "");
@@ -157,6 +164,13 @@ export async function POST(req: Request) {
           .filter((h: any) => h.role && typeof h.content === "string");
       }
       // No image via JSON
+      if (json.analysis) {
+        try {
+          analysis = typeof json.analysis === "string" ? JSON.parse(json.analysis) : json.analysis;
+        } catch (_) {
+          analysis = null;
+        }
+      }
     }
   } catch (e) {
     ok = false;
@@ -166,7 +180,7 @@ export async function POST(req: Request) {
 
   const job_id = `web_${Math.random().toString(36).slice(2, 10)}`;
 
-  // Step 1: Ingest + Analyze (optional if image present)
+  // Step 1: Ingest + Analyze (use provided analysis when available and no new image)
   if (imageFile) {
     const t0 = Date.now();
     logStep(logs, "ingest_analyze", "start", "Uploading image to pipeline");
@@ -179,8 +193,10 @@ export async function POST(req: Request) {
       ok = false; // non-fatal, can proceed without analysis
       logStep(logs, "ingest_analyze", "error", "Failed to analyze image", undefined, Date.now() - t0, e);
     }
+  } else if (analysis) {
+    logStep(logs, "ingest_analyze", "ok", "Using provided analysis", { provided: true });
   } else {
-    logStep(logs, "ingest_analyze", "ok", "No image provided, skipping analysis");
+    logStep(logs, "ingest_analyze", "ok", "No image or analysis provided, using fallback background");
   }
 
   // Step 2: Copy generation
@@ -331,5 +347,6 @@ export async function POST(req: Request) {
     logs,
     thumbnail_url: renderRes?.thumbnail_url,
     outputs: renderRes?.outputs || [],
+    analysis,
   });
 }
