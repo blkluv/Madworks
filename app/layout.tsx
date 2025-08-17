@@ -3,7 +3,6 @@ import { GeistSans } from 'geist/font/sans'
 import { GeistMono } from 'geist/font/mono'
 import './globals.css'
 import { AppProvider } from '@/components/app-context'
-import { CreditsPill } from '@/components/credits-pill'
 import { AuthProvider } from '@/components/auth-provider'
 import { SiteHeader } from '@/components/site-header'
 
@@ -32,7 +31,7 @@ html {
       <body className="text-zinc-100">
         <AuthProvider>
           <AppProvider>
-            <div className="relative min-h-screen">
+            <div className="relative h-screen flex flex-col overflow-hidden">
               {/* Global subtle background gradient (behind everything, including header) */}
               <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
                 {/* Subtle marble texture overlay */}
@@ -48,8 +47,9 @@ html {
               </div>
 
               <SiteHeader />
-              {children}
-              <CreditsPill />
+              <main className="flex-1 min-h-0">
+                {children}
+              </main>
             </div>
           </AppProvider>
         </AuthProvider>

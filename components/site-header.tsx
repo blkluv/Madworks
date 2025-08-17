@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useSession } from "next-auth/react"
+import { CreditsPill } from "@/components/credits-pill"
 
 type ViewType = "home" | "projects" | "gallery" | "premium" | "chat"
 
@@ -35,7 +36,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
           <div
             role="button"
             onClick={() => goto("home")}
-            className="flex items-center gap-3 cursor-pointer group"
+            className="flex items-center gap-3 cursor-pointer group justify-self-start"
             aria-label="Go to Home"
             title="Madworks AI - Home"
           >
@@ -90,13 +91,15 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             </nav>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3 justify-self-end">
+            {/* Right cluster: Upgrade, Credits, User avatar */}
             <Button
               onClick={() => (window.location.href = "/upgrade")}
-              className="h-10 px-4 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black shadow-lg shadow-yellow-500/25"
+              className="h-12 px-5 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black shadow-lg shadow-yellow-500/25"
             >
               <Crown className="w-4 h-4 mr-2" /> Upgrade
             </Button>
+            <CreditsPill variant="inline" />
             <div className="relative" ref={dropdownRef}>
               <Button
                 size="icon"
@@ -124,7 +127,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                 )}
               </Button>
               <div 
-                className={`absolute top-full mt-2 left-1/2 -translate-x-1/2 w-56 bg-zinc-950/95 backdrop-blur rounded-xl shadow-lg border border-zinc-800 overflow-hidden transition-all duration-200 ease-out origin-top ${
+                className={`absolute top-full mt-2 right-0 w-56 bg-zinc-950/95 backdrop-blur rounded-xl shadow-lg border border-zinc-800 overflow-hidden transition-all duration-200 ease-out origin-top ${
                   showAccountDropdown 
                     ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' 
                     : 'opacity-0 scale-95 -translate-y-2 pointer-events-none'

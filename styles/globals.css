@@ -121,3 +121,79 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Custom dark scrollbar (subtle, seamless) */
+.custom-scrollbar {
+  /* Firefox */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(63,63,70,0.8) transparent; /* thumb track */
+}
+.custom-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent; /* avoid black bar */
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(99,102,241,0.25), rgba(236,72,153,0.25), rgba(245,158,11,0.25));
+  border: 1px solid rgba(63,63,70,0.8); /* zinc-700 */
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(99,102,241,0.45), rgba(236,72,153,0.45), rgba(245,158,11,0.45));
+}
+.custom-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Hide scrollbars completely (for horizontal scrollers near composer) */
+.scrollbar-none {
+  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: none; /* Firefox */
+}
+.scrollbar-none::-webkit-scrollbar {
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Sidebar (chats list) — friendlier, slightly thicker */
+.sidebar-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(113,113,122,0.7) transparent; /* thumb track */
+}
+.sidebar-scrollbar::-webkit-scrollbar {
+  width: 12px;
+}
+.sidebar-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(99,102,241,0.35), rgba(236,72,153,0.35), rgba(245,158,11,0.35));
+  border: 1px solid rgba(63,63,70,0.85); /* zinc-700/85 */
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 1px rgba(24,24,27,0.3); /* subtle inner ring */
+}
+.sidebar-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(99,102,241,0.5), rgba(236,72,153,0.5), rgba(245,158,11,0.5));
+}
+
+/* Chat messages — slim, subtle */
+.chat-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(82,82,91,0.7) transparent; /* zinc-700-ish */
+}
+.chat-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(99,102,241,0.25), rgba(236,72,153,0.25), rgba(245,158,11,0.25));
+  border: 1px solid rgba(63,63,70,0.7);
+  border-radius: 9999px;
+}
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(99,102,241,0.4), rgba(236,72,153,0.4), rgba(245,158,11,0.4));
+}

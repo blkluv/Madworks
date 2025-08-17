@@ -1,149 +1,267 @@
 "use client"
 
-import React, { useEffect, useMemo, useRef, useState } from "react"
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { ImageIcon, Send, PlusCircle, Paperclip, Square, RectangleVertical, RectangleHorizontal } from "lucide-react"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { Textarea } from "@/components/ui/textarea"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
+import { PlusCircle, Paperclip, Image as ImageIcon, Send, SlidersHorizontal } from "lucide-react"
 import { useApp } from "@/components/app-context"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 
-// Types matching the API route logs
-// Minimal chat message + conversation types
-type ChatMessage = {
+interface Message {
   id: string
-  role: "user" | "assistant"
+  role: 'user' | 'assistant'
   content: string
-  attachments?: Array<{ type: "image"; url: string; variant?: string }>
   timestamp: string
+  attachments?: Array<{ type: string; url: string }>
 }
 
-type Conversation = {
+// Prefer a single best format per size/variant to avoid duplicates in the collage
+function dedupePreferredImages(
+  outs: Array<{ format: string; width: number; height: number; url: string; variant?: string }> = []
+) {
+  const rank: Record<string, number> = { png: 4, jpg: 3, jpeg: 3, webp: 2, svg: 1 }
+  const bestByKey = new Map<string, { format: string; width: number; height: number; url: string; variant?: string }>()
+  for (const o of outs) {
+    const fmt = (o.format || "").toLowerCase()
+    if (!["png", "jpg", "jpeg", "webp"].includes(fmt)) continue
+    const key = `${o.width}x${o.height}_${o.variant || ""}`
+    const existing = bestByKey.get(key)
+    if (!existing || (rank[fmt] || 0) > (rank[(existing.format || "").toLowerCase()] || 0)) {
+      bestByKey.set(key, o)
+    }
+  }
+  return Array.from(bestByKey.values()).map((o) => ({ ...o, url: normalizeUrl(o.url) }))
+}
+
+// Derive a human-friendly title for the conversation from AI response
+function deriveTitleFromResponse(json: PipelineResponse, fallbackPrompt: string): string {
+  let t = json?.copy_best?.headline
+    || json?.copy_variants?.[0]?.headline
+    || (fallbackPrompt || "New chat")
+  // cleanup
+  t = (t || "New chat").replace(/^\s+|\s+$/g, "").replace(/[\r\n]+/g, " ")
+  // keep it short
+  if (t.length > 60) t = t.slice(0, 57) + "…"
+  return t
+}
+
+interface Conversation {
   id: string
   title: string
-  messages: ChatMessage[]
+  messages: Message[]
+  createdAt: string
+  updatedAt: string
+  analysis?: any
 }
 
 type PipelineResponse = {
-  ok: boolean
-  job_id: string
-  copy_best?: { headline: string; subheadline: string; cta: string } | null
-  copy_variants?: Array<{ headline: string; subheadline: string; cta: string }>
-  composition?: { composition_id: string; svg: string; layout_data: any }
-  render?: { outputs: Array<{ format: string; width: number; height: number; url: string; variant?: string }>; thumbnail_url?: string }
-  qa?: any
-  export?: any
-  logs: any[]
+  copy_best?: {
+    headline: string
+    subheadline: string
+    cta: string
+  }
+  copy_variants?: Array<{
+    headline: string
+    subheadline: string
+    cta: string
+  }>
   thumbnail_url?: string
-  outputs?: Array<{ format: string; width: number; height: number; url: string; variant?: string }>
+  outputs?: Array<{
+    format: string
+    width: number
+    height: number
+    url: string
+  }>
+  error?: string
+  analysis?: any
 }
 
-// Normalize pipeline asset URLs to use the exposed localhost port in dev
-const PIPELINE_BASE = process.env.NEXT_PUBLIC_PIPELINE_URL || "http://localhost:8010"
 function normalizeUrl(u: string): string {
+  if (!u) return u
   try {
-    // Relative paths from backend (e.g. /static/..., /outputs/...)
-    if (
-      u.startsWith("/static/") ||
-      u.startsWith("static/") ||
-      u.startsWith("/outputs/") ||
-      u.startsWith("outputs/")
-    ) {
-      const base = (PIPELINE_BASE || "http://localhost:8010").replace(/\/$/, "")
-      const path = u.startsWith("/") ? u : `/${u}`
-      return `${base}${path}`
+    let v = u.trim()
+    // Attempt to decode percent-encoded URLs like http%3A//...
+    if (/%[0-9A-Fa-f]{2}/.test(v)) {
+      try { v = decodeURIComponent(v) } catch {}
     }
+    // If already absolute after decoding, return as-is
+    if (v.startsWith("http://") || v.startsWith("https://")) return v
 
-    const url = new URL(u)
-    if (url.port === "8000") {
-      // Map container internal port -> host mapped port
-      url.port = "8010"
-      if (url.hostname === "0.0.0.0") url.hostname = "localhost"
-      return url.toString()
-    }
-    return u
+    // Otherwise prefix with pipeline base
+    const base = (process.env.NEXT_PUBLIC_PIPELINE_BASE || "http://localhost:8010").replace(/\/$/, "")
+    const path = v.startsWith("/") ? v : `/${v}`
+    return `${base}${path}`
   } catch {
     return u
   }
 }
 
 export function ChatView() {
-  const [prompt, setPrompt] = useState("")
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
   const autoRanRef = useRef(false)
-  const messagesEndRef = useRef<HTMLDivElement | null>(null)
-
-  // Pending handoff from HomeView
-  const { pendingPrompt, setPendingPrompt, pendingFiles, setPendingFiles } = useApp()
-
-  // Aspect ratio selector state
-  const [selectedVariants, setSelectedVariants] = useState<string[]>(["3:4"]) // Default to 3:4
-  const variantOptions: Record<string, { label: string; width: number; height: number }> = {
-    '3:4': { label: "3:4 (Default)", width: 1080, height: 1440 },
-    '1:1': { label: "1:1 (Square)", width: 1080, height: 1080 },
-    '9:16': { label: "9:16 (Reels)", width: 1080, height: 1920 },
-    '16:9': { label: "16:9 (Landscape)", width: 1920, height: 1080 },
-  }
-  const variantIcons: Record<string, React.ElementType> = {
-    '3:4': RectangleVertical,
-    '1:1': Square,
-    '9:16': RectangleVertical,
-    '16:9': RectangleHorizontal,
-  }
-
+  const { setPendingPrompt, pendingPrompt, pendingFiles, setPendingFiles, decrementCredit } = useApp()
   const [conversations, setConversations] = useState<Conversation[]>([
-    { id: "c_default", title: "New chat", messages: [] },
+    { 
+      id: "c_default", 
+      title: "New chat", 
+      messages: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    },
   ])
   const [activeId, setActiveId] = useState<string>("c_default")
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [input, setInput] = useState("")
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState("1:1")
+  const [platform, setPlatform] = useState<"" | "instagram" | "facebook" | "linkedin" | "x">("")
+  const [tone, setTone] = useState<"" | "bold" | "friendly" | "professional" | "minimal">("")
+  const [variants, setVariants] = useState<number>(3)
+  const [recommendation, setRecommendation] = useState<{
+    headline: string
+    subheadline: string
+    cta: string
+  } | null>(null)
+  const [lastOutputs, setLastOutputs] = useState<Array<{ format: string; width: number; height: number; url: string; variant?: string }>>([])
+  const [copyList, setCopyList] = useState<Array<{ headline: string; subheadline: string; cta: string }>>([])
+  const [showOptions, setShowOptions] = useState(false)
 
-  const activeConv = useMemo(() => conversations.find((c) => c.id === activeId)!, [conversations, activeId])
+  const suggestions: Array<{ label: string; text: string; preset?: { platform?: string; tone?: string; aspect?: string; variants?: number } }> = [
+    {
+      label: "Stories variants",
+      text: "Try a few bold, high-contrast Story options. Keep headlines punchy and legible.",
+      preset: { platform: "instagram", tone: "bold", aspect: "9:16", variants: 5 },
+    },
+    {
+      label: "Credible LinkedIn",
+      text: "Professional, concise tone. Suggest a clean layout and clear CTA.",
+      preset: { platform: "linkedin", tone: "professional", aspect: "1:1", variants: 3 },
+    },
+    {
+      label: "Seasonal promo",
+      text: "Gently highlight a limited-time offer. Keep copy brand-safe and clear.",
+    },
+    {
+      label: "Square carousel",
+      text: "Simple square carousel tips. Center key text and avoid clutter.",
+    },
+    {
+      label: "Font pairing ideas",
+      text: "Suggest a couple of safe headline/body pairings from the approved set.",
+    },
+  ]
+
+  const dimensionOptions = [
+    { value: "1:1", label: "Square (1:1)", desc: "Instagram Feed, Carousels" },
+    { value: "4:5", label: "Portrait (4:5)", desc: "IG Portrait, FB Feed" },
+    { value: "9:16", label: "Story (9:16)", desc: "IG Stories/Reels, TikTok" },
+    { value: "16:9", label: "Landscape (16:9)", desc: "YouTube, Web Hero" },
+  ]
+
+  const applySuggestion = (s: string) => {
+    setInput((prev) => {
+      if (!prev) return s
+      const needsSpace = /[.!?]$/.test(prev.trim())
+      return prev.trimEnd() + (needsSpace ? " " : ". ") + s
+    })
+  }
+
+  const sizesForAspect = (ar: string) => {
+    switch (ar) {
+      case "4:5":
+        return [{ name: "4:5", width: 1080, height: 1350 }]
+      case "9:16":
+        return [{ name: "9:16", width: 1080, height: 1920 }]
+      case "16:9":
+        return [{ name: "16:9", width: 1920, height: 1080 }]
+      case "1:1":
+      default:
+        return [{ name: "1:1", width: 1080, height: 1080 }]
+    }
+  }
+
+  const activeConv = conversations.find((c) => c.id === activeId) || {
+    id: "c_default",
+    title: "New chat",
+    messages: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
 
   const startNewChat = () => {
     const id = `c_${Date.now()}`
-    setConversations((prev) => [{ id, title: "New chat", messages: [] }, ...prev])
+    const now = new Date().toISOString()
+    setConversations((prev) => [
+      { 
+        id, 
+        title: "New chat", 
+        messages: [],
+        createdAt: now,
+        updatedAt: now
+      }, 
+      ...prev
+    ])
     setActiveId(id)
+    // Deduct credits when a new chat is created
+    try { decrementCredit(0.25) } catch {}
   }
 
   const updateActive = (updater: (c: Conversation) => Conversation) => {
     setConversations((prev) => prev.map((c) => (c.id === activeId ? updater(c) : c)))
   }
 
-  async function handleSend(e?: React.FormEvent) {
-    e?.preventDefault()
-    if (!prompt && !imageFile) return
-
-    const userMsg: ChatMessage = {
-      id: `m_${Date.now()}`,
-      role: "user",
-      content: prompt,
-      timestamp: new Date().toISOString(),
-      attachments: imageFile ? [{ type: "image", url: URL.createObjectURL(imageFile) }] : undefined,
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const isFirst = (activeConv?.messages?.length || 0) === 0
+    // Enforce: first message must have BOTH image + prompt
+    if (isFirst) {
+      if (!imageFile || !input.trim()) {
+        updateActive((c) => ({
+          ...c,
+          messages: [
+            ...c.messages,
+            { id: `m_${Date.now()}`, role: 'assistant', content: "Please attach an image and enter a prompt to start a new ad.", timestamp: new Date().toISOString() },
+          ],
+        }))
+        return
+      }
+    } else {
+      // Subsequent messages require at least a prompt
+      if (!input.trim()) return
     }
 
-    updateActive((c) => ({
-      ...c,
-      title: c.messages.length === 0 && prompt ? prompt.slice(0, 40) : c.title,
-      messages: [...c.messages, userMsg],
-    }))
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: input,
+      timestamp: new Date().toISOString(),
+      ...(imageFile && {
+        attachments: [{
+          type: 'image',
+          url: URL.createObjectURL(imageFile)
+        }]
+      })
+    }
+
+    updateActive((c) => ({ ...c, messages: [...c.messages, userMessage] }))
 
     setBusy(true)
     try {
       const form = new FormData()
-      form.append("prompt", prompt || "")
+      form.append("prompt", input || "")
       if (imageFile) form.append("image", imageFile, imageFile.name || "upload.png")
-
-      // Include selected sizes for the orchestrator
-      const sizes = selectedVariants.map((v) => ({
-        name: v,
-        width: variantOptions[v].width,
-        height: variantOptions[v].height,
-      }))
-      if (sizes.length > 0) form.append("sizes", JSON.stringify(sizes))
-
-      // Include full past context for this chat (role + content only)
-      const historyPayload = [...activeConv.messages, userMsg].map((m) => ({ role: m.role, content: m.content }))
-      form.append("history", JSON.stringify(historyPayload))
+      // Reuse previous analysis if no new image provided
+      if (!imageFile && activeConv?.analysis) {
+        try { form.append("analysis", JSON.stringify(activeConv.analysis)) } catch {}
+      }
+      if (platform) form.append("platform", platform)
+      if (tone) form.append("tone", tone)
+      form.append("num_variants", String(variants || 1))
+      try { form.append("sizes", JSON.stringify(sizesForAspect(selectedAspectRatio))) } catch {}
 
       const res = await fetch("/api/pipeline/run", { method: "POST", body: form })
       if (!res.ok) {
@@ -152,37 +270,48 @@ export function ChatView() {
       }
       const json = (await res.json()) as PipelineResponse
 
-      // We no longer include textual copy in chat output – images only
+      const textParts: string[] = []
+      if (json.copy_best) {
+        textParts.push(
+          `Headline: ${json.copy_best.headline}\n${json.copy_best.subheadline}\nCTA: ${json.copy_best.cta}`,
+        )
+      } else if (json.copy_variants?.length) {
+        textParts.push(`Generated ${json.copy_variants.length} copy variants.`)
+      }
+      // capture best copy for front-and-center recommendations panel
+      const best = json.copy_best || (json.copy_variants && json.copy_variants[0]) || null
+      setRecommendation(best ? { headline: best.headline, subheadline: best.subheadline, cta: best.cta } : null)
 
-      // Select exactly one JPG per variant (aspect ratio) and order them
-      const order = ["square", "portrait", "landscape", "story"]
-      const byVariant = new Map<string, string>()
+      const attachments: Array<{ type: "image"; url: string }> = []
+      if (json.thumbnail_url) attachments.push({ type: "image", url: normalizeUrl(json.thumbnail_url) })
       for (const o of json.outputs || []) {
-        const fmt = (o.format || "").toLowerCase()
-        if (fmt === "jpg" || fmt === "jpeg") {
-          const v = (o.variant as string) || "default"
-          if (!byVariant.has(v)) byVariant.set(v, normalizeUrl(o.url))
-        }
+        const fmt = o.format.toLowerCase()
+        if (["png", "jpg", "jpeg", "webp", "svg"].includes(fmt)) attachments.push({ type: "image", url: normalizeUrl(o.url) })
       }
-      const attachments: Array<{ type: "image"; url: string; variant?: string }> = []
-      for (const v of order) {
-        const url = byVariant.get(v)
-        if (url) attachments.push({ type: "image", url, variant: v })
-      }
-      // Fallback: if no known variants, include whatever jpgs exist
-      if (attachments.length === 0) {
-        for (const [_, url] of byVariant) attachments.push({ type: "image", url })
-      }
+      // Keep a normalized, deduped list for the collage
+      setLastOutputs(dedupePreferredImages(json.outputs || []))
+      setCopyList((json.copy_variants && json.copy_variants.length ? json.copy_variants : (json.copy_best ? [json.copy_best] : [])).map((c: any) => ({ headline: c.headline, subheadline: c.subheadline, cta: c.cta })))
 
-      const assistantMsg: ChatMessage = {
+      const assistantMsg: Message = {
         id: `m_${Date.now() + 1}`,
         role: "assistant",
         content: "",
         timestamp: new Date().toISOString(),
-        attachments: attachments.length ? attachments : undefined,
+        // We show a single collage from lastOutputs; avoid duplicating as attachments
+        attachments: undefined,
       }
 
-      updateActive((c) => ({ ...c, messages: [...c.messages, assistantMsg] }))
+      updateActive((c) => ({
+        ...c,
+        messages: [...c.messages, assistantMsg],
+        analysis: json.analysis ? json.analysis : c.analysis,
+      }))
+
+      // Auto-name the conversation after the first successful AI response
+      if (isFirst) {
+        const title = deriveTitleFromResponse(json, input)
+        updateActive((c) => ({ ...c, title }))
+      }
     } catch (err: any) {
       updateActive((c) => ({
         ...c,
@@ -193,240 +322,335 @@ export function ChatView() {
       }))
     } finally {
       setBusy(false)
-      setPrompt("")
+      setInput("")
       setImageFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ""
     }
   }
-
-  // Auto-ingest pending data handed off from Home and send once
-  useEffect(() => {
-    if (autoRanRef.current) return
-    const hasPending = !!pendingPrompt || (pendingFiles && pendingFiles.length > 0)
-    if (!hasPending) return
-    autoRanRef.current = true
-    ;(async () => {
-      const firstFile = pendingFiles?.[0] || null
-      setPrompt(pendingPrompt || "")
-      setImageFile(firstFile)
-      // allow state to commit before sending
-      await new Promise((r) => setTimeout(r, 0))
-      await handleSend()
-      // clear pending
-      setPendingPrompt("")
-      setPendingFiles([])
-    })()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingPrompt, pendingFiles])
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [activeConv.messages.length])
 
+  // Auto-ingest pending data handed off from Home and send once
+  const handleSendWithPending = useCallback(async () => {
+    if (autoRanRef.current) return
+    const hasPending = !!pendingPrompt || (pendingFiles && pendingFiles.length > 0)
+    if (!hasPending) return
+    autoRanRef.current = true
+    
+    const firstFile = pendingFiles?.[0] || null
+    setInput(pendingPrompt || "")
+    setImageFile(firstFile)
+    // allow state to commit before sending
+    await new Promise((r) => setTimeout(r, 0))
+    await handleSendMessage(new Event('submit') as any)
+    // clear pending
+    setPendingPrompt("")
+    setPendingFiles([])
+  }, [pendingPrompt, pendingFiles, setPendingPrompt, setPendingFiles, handleSendMessage])
+
+  useEffect(() => {
+    handleSendWithPending()
+  }, [handleSendWithPending])
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const f = e.dataTransfer?.files?.[0]
+    if (f && f.type.startsWith("image/")) setImageFile(f)
+  }
+
   return (
-    <div className="h-[75vh] min-h-0 bg-zinc-950/60 border border-zinc-900 rounded-2xl overflow-hidden flex">
+    <div className="h-full min-h-0 w-full bg-transparent overflow-hidden flex">
       {/* Left: Conversations */}
-      <aside className="hidden md:flex w-64 lg:w-72 border-r border-zinc-900 flex-col min-h-0">
+      <aside className="hidden md:flex w-[400px] lg:w-[480px] flex-col">
         <div className="p-3">
-          <Button onClick={startNewChat} className="w-full rounded-lg">
-            <PlusCircle className="w-4 h-4 mr-2" /> New chat
-          </Button>
-        </div>
-        <ScrollArea className="flex-1 min-h-0">
-          <div>
-            {conversations.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setActiveId(c.id)}
-                className={`w-full text-left px-3 py-2 hover:bg-zinc-900/60 ${c.id === activeId ? "bg-zinc-900/60" : ""}`}
-              >
-                <div className="truncate text-sm text-zinc-200">{c.title || "Untitled"}</div>
-                <div className="text-xs text-zinc-500">{c.messages.length} messages</div>
-              </button>
-            ))}
+          <div className="relative group isolate">
+            <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
+            <Button onClick={startNewChat} className="relative z-10 w-full h-16 rounded-2xl border border-zinc-800 bg-black/60 hover:bg-black/70 text-lg transition-all shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40">
+              <PlusCircle className="w-5 h-5 mr-2" /> New chat
+            </Button>
           </div>
-        </ScrollArea>
+        </div>
+        <div className="flex-1 overflow-y-auto sidebar-scrollbar">
+          {conversations.map((c) => (
+            <div key={c.id} className="px-3 py-1">
+              <div className="relative group isolate">
+                <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 group-hover:opacity-10 blur-sm transition-opacity z-0"></div>
+                <button
+                  onClick={() => setActiveId(c.id)}
+                  className={`relative z-10 w-full text-left px-4 py-2.5 text-sm rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30 ${
+                    activeId === c.id 
+                      ? 'border-indigo-500/40 bg-zinc-900 hover:bg-zinc-900' 
+                      : 'border-zinc-800 bg-black/40 hover:bg-black/50'
+                  }`}
+                  aria-current={activeId === c.id ? 'true' : undefined}
+                >
+                  {activeId === c.id && (
+                    <span className="pointer-events-none absolute left-2 top-2 bottom-2 w-1 rounded-full bg-gradient-to-b from-indigo-500 via-pink-500 to-amber-500 opacity-70" />
+                  )}
+                  <div className="truncate text-sm font-medium text-zinc-200 pl-1">{c.title || "Untitled"}</div>
+                  <div className="text-xs text-zinc-500 pl-1">{c.messages.length} messages</div>
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       </aside>
 
+      {/* Vertical separator */}
+      <div aria-hidden="true" className="hidden md:block w-px self-stretch bg-gradient-to-b from-transparent via-zinc-800 to-transparent" />
+
       {/* Right: Chat */}
-      <section className="flex-1 flex flex-col min-h-0">
-        {/* Messages */}
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="p-4 space-y-4">
-            {activeConv.messages.length === 0 && (
-              <div className="text-center text-zinc-500 mt-10">Start by typing a prompt or attaching an image.</div>
-            )}
-            {activeConv.messages.map((m) => {
-              const isUser = m.role === "user"
-              const hasAttachments = !!(m.attachments && m.attachments.length > 0)
-              return (
-                <div key={m.id} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                  {isUser ? (
-                    <div className="max-w-[80%] rounded-2xl px-4 py-3 border bg-zinc-900/60 border-zinc-800">
-                      {m.content?.trim() ? (
-                        <div className="whitespace-pre-wrap text-zinc-200">{m.content}</div>
-                      ) : null}
-                      {hasAttachments && (
-                        <div className="mt-2 grid grid-cols-2 gap-2">
-                          {m.attachments!.map((a, i) => (
-                            <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
-                              <img src={a.url} alt="attachment" className="rounded-md border border-zinc-800 max-h-48 object-contain" />
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : hasAttachments ? (
-                    <div className="w-full max-w-3xl">
-                      {(() => {
-                        const n = m.attachments!.length
-                        if (n === 1) {
-                          const a = m.attachments![0]
-                          return (
-                            <a href={a.url} target="_blank" rel="noreferrer" className="block group">
-                              <img src={a.url} alt="output" className="w-full max-h-[480px] object-contain rounded-2xl border border-zinc-800/70 bg-zinc-900/30 group-hover:bg-zinc-900/40 transition" />
-                            </a>
-                          )
+      <section className="flex-1 min-h-0 flex flex-col">
+        {/* Messages & Collage */}
+        <div className="flex-1 min-h-0 overflow-y-auto chat-scrollbar p-8 space-y-8 mx-auto w-full max-w-7xl">
+          {activeConv.messages.length === 0 && (
+            <div className="mx-auto max-w-3xl w-full">
+              <div className="mt-2 grid sm:grid-cols-2 gap-4">
+                {suggestions.slice(0, 4).map((s, i) => (
+                  <div key={i} className="relative group isolate">
+                    <div className="pointer-events-none absolute -inset-[2px] rounded-xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
+                    <button
+                      onClick={() => {
+                        if (s.preset) {
+                          if (s.preset.platform) setPlatform(s.preset.platform as any)
+                          if (s.preset.tone) setTone(s.preset.tone as any)
+                          if (s.preset.aspect) setSelectedAspectRatio(s.preset.aspect)
+                          if (s.preset.variants) setVariants(s.preset.variants)
                         }
-                        if (n === 2) {
-                          return (
-                            <div className="grid grid-cols-2 gap-2">
-                              {m.attachments!.map((a, i) => (
-                                <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block group">
-                                  <img src={a.url} alt="output" className="w-full h-64 object-cover rounded-2xl border border-zinc-800/70 bg-zinc-900/30 group-hover:bg-zinc-900/40 transition" />
-                                </a>
-                              ))}
-                            </div>
-                          )
-                        }
-                        if (n === 3) {
-                          return (
-                            <div className="grid grid-cols-3 auto-rows-[140px] md:auto-rows-[180px] gap-2">
-                              {m.attachments!.map((a, i) => (
-                                <a
-                                  key={i}
-                                  href={a.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className={`block group ${i === 0 ? "col-span-2 row-span-2" : ""}`}
-                                >
-                                  <img src={a.url} alt="output" className="w-full h-full object-cover rounded-2xl border border-zinc-800/70 bg-zinc-900/30 group-hover:bg-zinc-900/40 transition" />
-                                </a>
-                              ))}
-                            </div>
-                          )
-                        }
-                        // 4 or more
-                        return (
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 auto-rows-[120px] md:auto-rows-[160px]">
-                            {m.attachments!.slice(0, 8).map((a, i) => (
-                              <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block group">
-                                <img src={a.url} alt="output" className="w-full h-full object-cover rounded-2xl border border-zinc-800/70 bg-zinc-900/30 group-hover:bg-zinc-900/40 transition" />
-                              </a>
-                            ))}
-                          </div>
-                        )
-                      })()}
-                    </div>
-                  ) : (
-                    <div className="max-w-[80%] rounded-2xl px-4 py-3 border bg-zinc-900/40 border-zinc-800">
-                      {m.content?.trim() ? (
-                        <div className="whitespace-pre-wrap text-zinc-200">{m.content}</div>
-                      ) : null}
+                        applySuggestion(s.text)
+                      }}
+                      className="relative z-10 w-full text-left rounded-xl border border-zinc-900/60 bg-zinc-900/50 hover:bg-zinc-900/60 p-5"
+                    >
+                      <div className="text-base text-zinc-200">{s.label}</div>
+                      <div className="text-sm text-zinc-400 mt-1 line-clamp-2">{s.text}</div>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Collage of latest outputs */}
+          {activeConv.messages.length > 0 && lastOutputs.length > 0 && (
+            <div className="mx-auto max-w-6xl w-full">
+              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Collage</div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {lastOutputs.map((o, i) => (
+                  <a key={i} href={o.url} target="_blank" rel="noreferrer" className="relative block group isolate">
+                    <span className="pointer-events-none absolute -inset-[2px] rounded-md bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></span>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={o.url} alt={`${o.format} ${o.width}x${o.height}`} className="relative z-10 rounded-md border border-zinc-900/60 bg-zinc-900/40 aspect-square object-contain group-hover:border-zinc-800" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Only show user messages (no assistant text) */}
+          {activeConv.messages.filter((m) => m.role === 'user').map((m) => (
+            <div key={m.id} className="flex justify-end">
+              <div className="relative group isolate max-w-[85%]">
+                <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
+                <div className="relative z-10 rounded-2xl px-5 py-3.5 border bg-zinc-900/50 border-zinc-900/60">
+                  <div className="whitespace-pre-wrap text-zinc-200 text-[15px]">{m.content}</div>
+                  {m.attachments && m.attachments.length > 0 && (
+                    <div className="mt-2 grid grid-cols-2 gap-2">
+                      {m.attachments.map((a, i) => (
+                        <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={a.url} alt="attachment" className="rounded-md border border-zinc-900/60 max-h-48 object-contain" />
+                        </a>
+                      ))}
                     </div>
                   )}
                 </div>
-              )
-            })}
-            <div ref={messagesEndRef} />
-          </div>
-        </ScrollArea>
-
-        {/* Composer */}
-        <div className="border-t border-zinc-900 p-3">
-          {/* Platform selector (intuitive cards) */}
-          <div className="mb-3">
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm font-medium text-zinc-300">Aspect Ratio</div>
-              <div className="text-xs text-zinc-500">
-                {selectedVariants.length} selected
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-              {Object.entries(variantOptions).map(([key, { label, width, height }]) => {
-                const selected = selectedVariants.includes(key)
-                const Icon = variantIcons[key]
-                const aspectRatio = `${width}:${height}`
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    title={label}
-                    onClick={() =>
-                      setSelectedVariants((prev) =>
-                        prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
-                      )
-                    }
-                    className={`text-left rounded-xl border transition-all duration-200 ${
-                      selected 
-                        ? "border-indigo-500/50 bg-indigo-500/10 ring-1 ring-indigo-500/30 shadow-md shadow-indigo-500/10" 
-                        : "border-zinc-800 bg-zinc-900/50 hover:bg-zinc-900/70 hover:border-zinc-700"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className="p-1.5 rounded-md bg-zinc-800/50">
-                        <Icon className="w-4 h-4 text-zinc-300" />
-                      </div>
-                      <div className="text-left">
-                        <div className="text-xs font-medium text-zinc-200">{label}</div>
-                        <div className="text-[10px] text-zinc-400">{width}×{height}</div>
-                      </div>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
+          ))}
+          {/* Anchor for auto-scroll at the end of messages */}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Composer */}
+        <div className="p-4 bg-transparent shrink-0" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+          <div className="mx-auto w-full max-w-7xl">
+          {/* Advanced controls (hidden by default) */}
+          {showOptions && (
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <ToggleGroup type="single" value={platform} onValueChange={(v) => setPlatform((v as any) || "")} className="bg-zinc-900/40 border border-zinc-900 rounded-md">
+              <ToggleGroupItem value="instagram" aria-label="Instagram" className="px-2 text-xs">IG</ToggleGroupItem>
+              <ToggleGroupItem value="facebook" aria-label="Facebook" className="px-2 text-xs">FB</ToggleGroupItem>
+              <ToggleGroupItem value="linkedin" aria-label="LinkedIn" className="px-2 text-xs">LI</ToggleGroupItem>
+              <ToggleGroupItem value="x" aria-label="X" className="px-2 text-xs">X</ToggleGroupItem>
+            </ToggleGroup>
+            <ToggleGroup type="single" value={tone} onValueChange={(v) => setTone((v as any) || "")} className="bg-zinc-900/40 border border-zinc-900 rounded-md">
+              <ToggleGroupItem value="bold" aria-label="Bold" className="px-2 text-xs">B</ToggleGroupItem>
+              <ToggleGroupItem value="friendly" aria-label="Friendly" className="px-2 text-xs">F</ToggleGroupItem>
+              <ToggleGroupItem value="professional" aria-label="Professional" className="px-2 text-xs">P</ToggleGroupItem>
+              <ToggleGroupItem value="minimal" aria-label="Minimal" className="px-2 text-xs">M</ToggleGroupItem>
+            </ToggleGroup>
+            <ToggleGroup type="single" value={String(variants)} onValueChange={(v) => setVariants(Number(v || 3))} className="bg-zinc-900/40 border border-zinc-900 rounded-md">
+              <ToggleGroupItem value="1" aria-label="1 variant" className="px-2 text-xs">1</ToggleGroupItem>
+              <ToggleGroupItem value="3" aria-label="3 variants" className="px-2 text-xs">3</ToggleGroupItem>
+              <ToggleGroupItem value="5" aria-label="5 variants" className="px-2 text-xs">5</ToggleGroupItem>
+            </ToggleGroup>
           </div>
-          <form className="flex items-center gap-2" onSubmit={handleSend}>
+          )}
+
+          {/* AI suggestions removed */}
+
+          <form className="flex items-end gap-3" onSubmit={handleSendMessage}>
             <input
               type="file"
               ref={fileInputRef}
-              className="hidden"
               accept="image/*"
               onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+              className="hidden"
             />
-            <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={busy}>
-              <Paperclip className="w-4 h-4 mr-2" /> Attach
-            </Button>
-            <Input
-              className="flex-1"
-              placeholder="Send a message..."
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              disabled={busy}
-            />
-            <Button type="submit" disabled={busy || (!prompt && !imageFile)}>
-              {busy ? "Sending..." : (<><Send className="w-4 h-4 mr-2" /> Send</>)}
-            </Button>
+            <div className="flex-1">
+              <div className="relative group isolate">
+                {/* Chromatic glow background (behind) */}
+                <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-30 blur-md z-0" />
+                <div className="relative z-10 rounded-2xl border border-zinc-800 bg-black/50">
+                  {/* Upload (left) */}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="absolute left-2 bottom-2 w-12 h-12 rounded-full bg-zinc-900/70 hover:bg-zinc-900 text-zinc-200 flex items-center justify-center border border-zinc-700/60 shadow-[0_0_20px_rgba(99,102,241,0.25)]"
+                    title="Attach image"
+                  >
+                    <Paperclip className="w-5 h-5" />
+                  </button>
+                  {/* Textarea */}
+                  <Textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSendMessage(new Event('submit') as any)
+                      }
+                    }}
+                    placeholder={activeConv.messages.length === 0 ? "Attach an image and enter a prompt to start..." : "Type your prompt (Shift+Enter for newline)..."}
+                    className="flex-1 bg-black/40 border-none min-h-[100px] pl-16 pr-48 py-4 text-base resize-none"
+                    rows={3}
+                  />
+                  {/* Right controls */}
+                  <div className="absolute right-2 bottom-2 flex items-center gap-2">
+                    {/* Preferences */}
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          className="relative w-12 h-12 rounded-full bg-zinc-900/70 hover:bg-zinc-900 text-zinc-200 border border-zinc-700/60 flex items-center justify-center shadow-[0_0_22px_rgba(236,72,153,0.25)]"
+                          title="Preferences"
+                        >
+                          <SlidersHorizontal className="w-5 h-5" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-80 bg-zinc-950 border-zinc-900 text-zinc-200">
+                        <div className="space-y-3">
+                          <div>
+                            <div className="text-xs text-zinc-400 mb-1">Platform</div>
+                            <ToggleGroup type="single" value={platform} onValueChange={(v) => setPlatform((v as any) || "") } className="bg-zinc-900/40 border border-zinc-900 rounded-md">
+                              <ToggleGroupItem value="instagram" aria-label="Instagram" className="px-2 text-xs">IG</ToggleGroupItem>
+                              <ToggleGroupItem value="facebook" aria-label="Facebook" className="px-2 text-xs">FB</ToggleGroupItem>
+                              <ToggleGroupItem value="linkedin" aria-label="LinkedIn" className="px-2 text-xs">LI</ToggleGroupItem>
+                              <ToggleGroupItem value="x" aria-label="X" className="px-2 text-xs">X</ToggleGroupItem>
+                            </ToggleGroup>
+                          </div>
+                          <div>
+                            <div className="text-xs text-zinc-400 mb-1">Tone</div>
+                            <ToggleGroup type="single" value={tone} onValueChange={(v) => setTone((v as any) || "") } className="bg-zinc-900/40 border border-zinc-900 rounded-md">
+                              <ToggleGroupItem value="bold" aria-label="Bold" className="px-2 text-xs">B</ToggleGroupItem>
+                              <ToggleGroupItem value="friendly" aria-label="Friendly" className="px-2 text-xs">F</ToggleGroupItem>
+                              <ToggleGroupItem value="professional" aria-label="Professional" className="px-2 text-xs">P</ToggleGroupItem>
+                              <ToggleGroupItem value="minimal" aria-label="Minimal" className="px-2 text-xs">M</ToggleGroupItem>
+                            </ToggleGroup>
+                          </div>
+                          <div>
+                            <div className="text-xs text-zinc-400 mb-1">Variants</div>
+                            <ToggleGroup type="single" value={String(variants)} onValueChange={(v) => setVariants(Number(v || 3))} className="bg-zinc-900/40 border border-zinc-900 rounded-md">
+                              <ToggleGroupItem value="1" aria-label="1 variant" className="px-2 text-xs">1</ToggleGroupItem>
+                              <ToggleGroupItem value="3" aria-label="3 variants" className="px-2 text-xs">3</ToggleGroupItem>
+                              <ToggleGroupItem value="5" aria-label="5 variants" className="px-2 text-xs">5</ToggleGroupItem>
+                            </ToggleGroup>
+                          </div>
+                          <div>
+                            <div className="text-xs text-zinc-400 mb-1">Dimensions</div>
+                            <Select value={selectedAspectRatio} onValueChange={(v) => setSelectedAspectRatio(v)}>
+                              <SelectTrigger className="bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-900 rounded-md h-8 px-2">
+                                <SelectValue placeholder="Dimensions" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-zinc-950 border border-zinc-900 text-zinc-200">
+                                {dimensionOptions.map((o) => (
+                                  <SelectItem key={o.value} value={o.value} className="text-zinc-200 focus:bg-zinc-900">
+                                    {o.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                    {/* Send */}
+                    <button
+                      type="submit"
+                      disabled={busy || (activeConv.messages.length === 0 ? (!input.trim() || !imageFile) : (!input.trim()))}
+                      className="relative w-12 h-12 rounded-full flex items-center justify-center text-white disabled:opacity-60"
+                      title="Send"
+                    >
+                      <span className="absolute -inset-[2px] rounded-full bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-30 blur-md z-0" />
+                      {busy ? (
+                        <div className="relative z-10 w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <div className="relative z-10 w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center">
+                          <Send className="w-5 h-5" />
+                        </div>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {imageFile && (
+                <div className="mt-2 flex items-center gap-2 text-sm text-zinc-400">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={URL.createObjectURL(imageFile)} alt="preview" className="w-12 h-12 rounded object-cover border border-zinc-900/60" />
+                  <span><ImageIcon className="w-5 h-5 inline mr-1" /> {imageFile.name}</span>
+                  <button
+                    type="button"
+                    className="text-zinc-300 underline"
+                    onClick={() => {
+                      setImageFile(null);
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+              {!imageFile && activeConv?.analysis && (
+                <div className="mt-2 text-xs text-zinc-400">Reusing previously attached image for this chat.</div>
+              )}
+            </div>
           </form>
-          {imageFile && (
-            <div className="text-xs text-zinc-400 mt-2 flex items-center gap-2">
-              <ImageIcon className="w-4 h-4" /> Attached: {imageFile.name}
-              <button
-                className="text-zinc-300 underline"
-                onClick={() => {
-                  setImageFile(null)
-                  if (fileInputRef.current) fileInputRef.current.value = ""
-                }}
-              >
-                Remove
-              </button>
+          {busy && (
+            <div className="flex items-center justify-center py-4">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              </div>
             </div>
           )}
+          </div>
         </div>
       </section>
     </div>
   )
 }
-
