@@ -325,8 +325,6 @@ async def generate_copy_with_ai(
             for f in required_fields:
                 if f not in parsed:
                     parsed[f] = ""
-            parsed["headline"] = (parsed.get("headline") or "")[: constraints.max_headline]
-            parsed["subheadline"] = (parsed.get("subheadline") or "")[: constraints.max_sub]
             if parsed.get("cta") not in constraints.allowed_cta:
                 parsed["cta"] = constraints.allowed_cta[0]
             # Simple compliance guard: remove forbidden words
@@ -554,15 +552,12 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     # Colors / accents
     palette = analysis.get("palette", [])
     cta_color = palette[2] if len(palette) > 2 else "#2563EB"  # blue
+    text_panel_w = int(width * 0.62)
 
-    # Text wrapping
+    # Text wrapping (word-safe) and dynamic fitting
     content_width = width - 2 * padding
     headline = copy_data.get("headline", "").strip()
     subheadline = copy_data.get("subheadline", "").strip()
-    max_chars_headline = _measure_chars_for_width(content_width, headline_size)
-    max_chars_sub = _measure_chars_for_width(content_width, sub_size)
-    headline_lines = _wrap_text(headline, max_chars_headline)
-    sub_lines = _wrap_text(subheadline, max_chars_sub)
 
     # Build segment lines from emphasis ranges
     def _segments_by_line(full_text: str, lines: List[str], ranges: List[Dict[str, Any]]):
@@ -616,16 +611,84 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     em = copy_data.get("emphasis_ranges") or {}
     headline_ranges = em.get("headline") or []
     sub_ranges = em.get("subheadline") or []
-    headline_segments = _segments_by_line(headline, headline_lines, headline_ranges)
-    sub_segments = _segments_by_line(subheadline, sub_lines, sub_ranges)
 
-    # Vertical rhythm: headline near upper-left, sub below, CTA at bottom-left
-    line_gap = int(headline_size * 0.28)
-    sub_gap = int(sub_size * 0.24)
-    headline_y_start = padding + headline_size  # first baseline
-    # compute block height for headline
-    headline_block_h = len(headline_segments) * headline_size + (len(headline_segments) - 1) * line_gap
-    subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
+    # Iteratively reduce sizes until both text blocks fit above CTA
+    # and within content width using word wrapping.
+    max_attempts = 12
+    attempt = 0
+    best = None
+    while True:
+        # measure per current sizes
+        max_chars_headline = _measure_chars_for_width(content_width, headline_size)
+        max_chars_sub = _measure_chars_for_width(content_width, sub_size)
+        headline_lines = _wrap_text(headline, max_chars_headline)
+        sub_lines = _wrap_text(subheadline, max_chars_sub)
+
+        # Recompute segment lines with emphasis
+        headline_segments = _segments_by_line(headline, headline_lines, headline_ranges)
+        sub_segments = _segments_by_line(subheadline, sub_lines, sub_ranges)
+
+        # Vertical rhythm with current sizes
+        line_gap = int(headline_size * 0.28)
+        sub_gap = int(sub_size * 0.24)
+        headline_y_start = padding + headline_size
+        headline_block_h = len(headline_segments) * headline_size + max(0, (len(headline_segments) - 1) * line_gap)
+        subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
+        sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
+
+        # Space available before CTA
+        safe_bottom = cta_y - int(cta_height * 0.30)
+        text_bottom = subheadline_y_start + sub_block_h
+
+        fits = text_bottom <= safe_bottom
+        # Keep best-so-far if fits or first iteration
+        if fits:
+            best = (
+                headline_segments,
+                sub_segments,
+                line_gap,
+                sub_gap,
+                headline_y_start,
+                subheadline_y_start,
+                headline_size,
+                sub_size,
+            )
+            break
+
+        # record current as fallback in case we hit min sizes
+        if best is None:
+            best = (
+                headline_segments,
+                sub_segments,
+                line_gap,
+                sub_gap,
+                headline_y_start,
+                subheadline_y_start,
+                headline_size,
+                sub_size,
+            )
+
+        # Downscale and retry
+        attempt += 1
+        if attempt >= max_attempts or (headline_size <= 30 and sub_size <= 16):
+            # stop; use best recorded
+            headline_segments, sub_segments, line_gap, sub_gap, headline_y_start, subheadline_y_start, headline_size, sub_size = best
+            break
+        headline_size = max(30, int(headline_size * 0.92))
+        sub_size = max(16, int(sub_size * 0.92))
+
+    # Unpack best if we exited early without assigning
+    if isinstance(best, tuple):
+        (
+            headline_segments,
+            sub_segments,
+            line_gap,
+            sub_gap,
+            headline_y_start,
+            subheadline_y_start,
+            headline_size,
+            sub_size,
+        ) = best
 
     # SVG template with legibility gradient (applied only when an image exists) and a clean fallback background
     svg_template = """
@@ -635,6 +698,10 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 <stop offset="0%" stop-color="#000000" stop-opacity="0.35" />
                 <stop offset="50%" stop-color="#000000" stop-opacity="0.20" />
                 <stop offset="100%" stop-color="#000000" stop-opacity="0.08" />
+            </linearGradient>
+            <linearGradient id="shadeLeft" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#000000" stop-opacity="0.55" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
             </linearGradient>
             <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
                 <stop offset="0%" stop-color="#1f2937" stop-opacity="1" />
@@ -656,6 +723,8 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
         <!-- Content -->
         <g>
+            <!-- Stronger left-side scrim for text legibility -->
+            <rect x="0" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shadeLeft)" />
             <!-- Headline with emphasis tspans -->
             <text x="{{ padding }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{{ text_color }}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)">
                 {% for line in headline_segments %}
@@ -679,7 +748,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             </text>
 
             <!-- CTA Button -->
-            <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="10" fill="{{ cta_color }}" filter="url(#shadow)"/>
+            <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="10" fill="{{ cta_color }}" filter="url(#shadow)" stroke="#ffffff" stroke-opacity="0.12"/>
             <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta }}</text>
         </g>
     </svg>
@@ -723,6 +792,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         headline_weight=headline_weight,
         body_weight=body_weight,
         cta_color=cta_color,
+        text_panel_w=text_panel_w,
         original_url=img_href,
         int=int,
     )

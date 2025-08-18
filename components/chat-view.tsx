@@ -192,6 +192,9 @@ export function ChatView() {
     updatedAt: new Date().toISOString()
   }
 
+  // Track the most recent assistant message to anchor inline outputs/collage
+  const lastAssistantId = [...activeConv.messages].filter((m) => m.role === 'assistant').slice(-1)[0]?.id
+
   const startNewChat = () => {
     const id = `c_${Date.now()}`
     const now = new Date().toISOString()
@@ -433,43 +436,77 @@ export function ChatView() {
             </div>
           )}
 
-          {/* Collage of latest outputs */}
-          {activeConv.messages.length > 0 && lastOutputs.length > 0 && (
-            <div className="mx-auto max-w-6xl w-full">
-              <div className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Collage</div>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {lastOutputs.map((o, i) => (
-                  <a key={i} href={o.url} target="_blank" rel="noreferrer" className="relative block group isolate">
-                    <span className="pointer-events-none absolute -inset-[2px] rounded-md bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></span>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={o.url} alt={`${o.format} ${o.width}x${o.height}`} className="relative z-10 rounded-md border border-zinc-900/60 bg-zinc-900/40 aspect-square object-contain group-hover:border-zinc-800" />
-                  </a>
-                ))}
+          {/* Message thread: render both user and assistant messages inline */}
+          {activeConv.messages.map((m) => (
+            m.role === 'user' ? (
+              <div key={m.id} className="flex justify-end">
+                <div className="relative group isolate max-w-[85%]">
+                  <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
+                  <div className="relative z-10 rounded-2xl px-5 py-3.5 border bg-zinc-900/50 border-zinc-900/60">
+                    <div className="whitespace-pre-wrap text-zinc-200 text-[15px]">{m.content}</div>
+                    {m.attachments && m.attachments.length > 0 && (
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        {m.attachments.map((a, i) => (
+                          <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={a.url} alt="attachment" className="rounded-md border border-zinc-900/60 max-h-48 object-contain" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div key={m.id} className="flex justify-start">
+                <div className="relative group isolate max-w-[85%]">
+                  <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 group-hover:opacity-10 blur-sm transition-opacity z-0"></div>
+                  <div className="relative z-10 rounded-2xl px-5 py-3.5 border bg-zinc-900/40 border-zinc-900/60">
+                    {m.content && (
+                      <div className="whitespace-pre-wrap text-zinc-200 text-[15px] mb-2">{m.content}</div>
+                    )}
+                    {/* Recommended copy (if available) */}
+                    {recommendation && m.id === lastAssistantId && (
+                      <div className="mb-3">
+                        <div className="text-sm text-zinc-200">{recommendation.headline}</div>
+                        <div className="text-sm text-zinc-400">{recommendation.subheadline}</div>
+                        <div className="text-xs text-zinc-500 mt-1">CTA: {recommendation.cta}</div>
+                      </div>
+                    )}
+                    {/* Inline collage anchored to the latest assistant message */}
+                    {lastOutputs.length > 0 && m.id === lastAssistantId && (
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {lastOutputs.map((o, i) => (
+                          <a key={i} href={o.url} target="_blank" rel="noreferrer" className="relative block group isolate">
+                            <span className="pointer-events-none absolute -inset-[2px] rounded-md bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></span>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={o.url} alt={`${o.format} ${o.width}x${o.height}`} className="relative z-10 rounded-md border border-zinc-900/60 bg-zinc-900/40 aspect-square object-contain group-hover:border-zinc-800" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          ))}
+
+          {/* Inline typing/loading indicator where the assistant response will appear */}
+          {busy && (
+            <div className="flex justify-start">
+              <div className="relative group isolate max-w-[85%]">
+                <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 blur-sm transition-opacity z-0"></div>
+                <div className="relative z-10 rounded-2xl px-5 py-4 border bg-zinc-900/40 border-zinc-900/60">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Only show user messages (no assistant text) */}
-          {activeConv.messages.filter((m) => m.role === 'user').map((m) => (
-            <div key={m.id} className="flex justify-end">
-              <div className="relative group isolate max-w-[85%]">
-                <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
-                <div className="relative z-10 rounded-2xl px-5 py-3.5 border bg-zinc-900/50 border-zinc-900/60">
-                  <div className="whitespace-pre-wrap text-zinc-200 text-[15px]">{m.content}</div>
-                  {m.attachments && m.attachments.length > 0 && (
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      {m.attachments.map((a, i) => (
-                        <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={a.url} alt="attachment" className="rounded-md border border-zinc-900/60 max-h-48 object-contain" />
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
           {/* Anchor for auto-scroll at the end of messages */}
           <div ref={messagesEndRef} />
         </div>
@@ -492,11 +529,16 @@ export function ChatView() {
               <ToggleGroupItem value="professional" aria-label="Professional" className="px-2 text-xs">P</ToggleGroupItem>
               <ToggleGroupItem value="minimal" aria-label="Minimal" className="px-2 text-xs">M</ToggleGroupItem>
             </ToggleGroup>
-            <ToggleGroup type="single" value={String(variants)} onValueChange={(v) => setVariants(Number(v || 3))} className="bg-zinc-900/40 border border-zinc-900 rounded-md">
-              <ToggleGroupItem value="1" aria-label="1 variant" className="px-2 text-xs">1</ToggleGroupItem>
-              <ToggleGroupItem value="3" aria-label="3 variants" className="px-2 text-xs">3</ToggleGroupItem>
-              <ToggleGroupItem value="5" aria-label="5 variants" className="px-2 text-xs">5</ToggleGroupItem>
-            </ToggleGroup>
+            <Select value={String(variants)} onValueChange={(v) => setVariants(Number(v || 3))}>
+              <SelectTrigger className="bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-900 rounded-md h-8 px-2 text-xs">
+                <SelectValue placeholder="Variants" />
+              </SelectTrigger>
+              <SelectContent className="bg-zinc-950 border border-zinc-900 text-zinc-200">
+                <SelectItem value="1" className="text-zinc-200 focus:bg-zinc-900">1 variant</SelectItem>
+                <SelectItem value="3" className="text-zinc-200 focus:bg-zinc-900">3 variants (recommended)</SelectItem>
+                <SelectItem value="5" className="text-zinc-200 focus:bg-zinc-900">5 variants</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           )}
 
@@ -573,11 +615,16 @@ export function ChatView() {
                           </div>
                           <div>
                             <div className="text-xs text-zinc-400 mb-1">Variants</div>
-                            <ToggleGroup type="single" value={String(variants)} onValueChange={(v) => setVariants(Number(v || 3))} className="bg-zinc-900/40 border border-zinc-900 rounded-md">
-                              <ToggleGroupItem value="1" aria-label="1 variant" className="px-2 text-xs">1</ToggleGroupItem>
-                              <ToggleGroupItem value="3" aria-label="3 variants" className="px-2 text-xs">3</ToggleGroupItem>
-                              <ToggleGroupItem value="5" aria-label="5 variants" className="px-2 text-xs">5</ToggleGroupItem>
-                            </ToggleGroup>
+                            <Select value={String(variants)} onValueChange={(v) => setVariants(Number(v || 3))}>
+                              <SelectTrigger className="bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-900 rounded-md h-8 px-2">
+                                <SelectValue placeholder="Select variants" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-zinc-950 border border-zinc-900 text-zinc-200">
+                                <SelectItem value="1" className="text-zinc-200 focus:bg-zinc-900">1 variant</SelectItem>
+                                <SelectItem value="3" className="text-zinc-200 focus:bg-zinc-900">3 variants (recommended)</SelectItem>
+                                <SelectItem value="5" className="text-zinc-200 focus:bg-zinc-900">5 variants</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </div>
                           <div>
                             <div className="text-xs text-zinc-400 mb-1">Dimensions</div>
@@ -639,15 +686,6 @@ export function ChatView() {
               )}
             </div>
           </form>
-          {busy && (
-            <div className="flex items-center justify-center py-4">
-              <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
-              </div>
-            </div>
-          )}
           </div>
         </div>
       </section>

@@ -235,47 +235,56 @@ export async function POST(req: Request) {
     { name: "story", width: 1080, height: 1920 },
   ];
   const sizesToUse = (sizes && sizes.length ? sizes : defaultSizes) as Array<{ name?: string; width: number; height: number }>;
-  const combinedOutputs: any[] = [];
-  let combinedThumb: string | undefined = undefined;
+  const combinedOutputs: any[] = []
+  let combinedThumb: string | undefined = undefined
   try {
-    const useCopy = copy?.variants?.[0] || copy || { headline: "", subheadline: "", cta: "Learn More" };
-    for (const s of sizesToUse) {
-      const t2 = Date.now();
-      logStep(logs, `compose_${s.name}`, "start", `Composing SVG ${s.width}x${s.height}`);
-      const composePayload = {
-        copy: useCopy,
-        analysis: analysis || {},
-        crop_info: { width: s.width, height: s.height },
-      };
-      const comp = await fetchJson(
-        `${PIPELINE_URL}/compose`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(composePayload),
-        },
-        TIMEOUTS.compose,
-      );
-      if (!composition) composition = comp; // capture first for backward compat
-      logStep(logs, `compose_${s.name}`, "ok", "SVG composed", { composition_id: comp?.composition_id }, Date.now() - t2);
+    const copyVariants = (Array.isArray(copy?.variants) && copy.variants.length
+      ? copy.variants
+      : [copy?.headline
+          ? { headline: copy.headline, subheadline: copy.subheadline, cta: copy.cta, emphasis_ranges: copy?.emphasis_ranges, font_recommendations: copy?.font_recommendations }
+          : { headline: "", subheadline: "", cta: "Learn More" }]);
 
-      const t3 = Date.now();
-      logStep(logs, `render_${s.name}`, "start", `Rendering ${s.width}x${s.height}`);
-      const renderPayload = { composition: comp, crop_info: { width: s.width, height: s.height }, job_id };
-      const r = await fetchJson(
-        `${PIPELINE_URL}/render`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(renderPayload),
-        },
-        TIMEOUTS.render,
-      );
-      // Tag outputs with variant for client-side use
-      const outs = (r?.outputs || []).map((o: any) => ({ ...o, variant: s.name }));
-      combinedOutputs.push(...outs);
-      if (!combinedThumb) combinedThumb = r?.thumbnail_url;
-      logStep(logs, `render_${s.name}`, "ok", "Rendered outputs", { outputs: outs.length }, Date.now() - t3);
+    for (let vi = 0; vi < copyVariants.length; vi++) {
+      const v = copyVariants[vi];
+      const vLabel = `v${vi + 1}`;
+      for (const s of sizesToUse) {
+        const t2 = Date.now();
+        logStep(logs, `compose_${s.name}_${vLabel}`, "start", `Composing SVG ${s.width}x${s.height} for ${vLabel}`);
+        const composePayload = {
+          copy: v,
+          analysis: analysis || {},
+          crop_info: { width: s.width, height: s.height },
+        };
+        const comp = await fetchJson(
+          `${PIPELINE_URL}/compose`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(composePayload),
+          },
+          TIMEOUTS.compose,
+        );
+        if (!composition) composition = comp; // capture first for backward compat
+        logStep(logs, `compose_${s.name}_${vLabel}`, "ok", "SVG composed", { composition_id: comp?.composition_id }, Date.now() - t2);
+
+        const t3 = Date.now();
+        logStep(logs, `render_${s.name}_${vLabel}`, "start", `Rendering ${s.width}x${s.height} for ${vLabel}`);
+        const renderPayload = { composition: comp, crop_info: { width: s.width, height: s.height }, job_id };
+        const r = await fetchJson(
+          `${PIPELINE_URL}/render`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(renderPayload),
+          },
+          TIMEOUTS.render,
+        );
+        // Tag outputs with copy variant and size for client-side use
+        const outs = (r?.outputs || []).map((o: any) => ({ ...o, variant: vLabel, size: s.name }));
+        combinedOutputs.push(...outs);
+        if (!combinedThumb) combinedThumb = r?.thumbnail_url;
+        logStep(logs, `render_${s.name}_${vLabel}`, "ok", "Rendered outputs", { outputs: outs.length }, Date.now() - t3);
+      }
     }
 
     renderRes = { outputs: combinedOutputs, thumbnail_url: combinedThumb };
