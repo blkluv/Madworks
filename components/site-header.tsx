@@ -5,6 +5,7 @@ import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, H
 import { useState, useEffect, useRef } from "react"
 import { useSession } from "next-auth/react"
 import { CreditsPill } from "@/components/credits-pill"
+import { useSearchParams } from "next/navigation"
 
 type ViewType = "home" | "projects" | "gallery" | "premium" | "chat"
 
@@ -13,6 +14,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
   const { data: session, status } = useSession()
   const isAuthed = status === 'authenticated'
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const searchParams = useSearchParams()
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -29,6 +31,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
     if (onNavChange) onNavChange(view)
     else window.location.href = `/?view=${view}`
   }
+  const selectedView: ViewType = (currentView ?? ((searchParams.get("view") as ViewType) || "home"))
   return (
     <div className="sticky top-0 z-50">
       <div className="container mx-auto px-4 py-4">
@@ -56,7 +59,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("home")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold ${currentView === 'home' ? 'bg-black/70 text-white' : ''}`}
+                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'home' ? 'bg-indigo-600/80 text-white border-indigo-500 shadow-sm' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   <Home className="w-4 h-4 mr-2" /> Home
                 </Button>
@@ -65,7 +68,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("chat")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold ${currentView === 'chat' ? 'bg-black/70 text-white' : ''}`}
+                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'chat' ? 'bg-indigo-600/80 text-white border-indigo-500 shadow-sm' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   <BookOpen className="w-4 h-4 mr-2" /> Create
                 </Button>
@@ -74,7 +77,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("projects")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold ${currentView === 'projects' ? 'bg-black/70 text-white' : ''}`}
+                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'projects' ? 'bg-indigo-600/80 text-white border-indigo-500 shadow-sm' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   <Folder className="w-4 h-4 mr-2" /> Projects
                 </Button>
@@ -83,7 +86,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("gallery")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold ${currentView === 'gallery' ? 'bg-black/70 text-white' : ''}`}
+                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'gallery' ? 'bg-indigo-600/80 text-white border-indigo-500 shadow-sm' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   <BookOpen className="w-4 h-4 mr-2" /> Premium Templates
                 </Button>

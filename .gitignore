@@ -29,3 +29,30 @@ infra/docker-compose.yml
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python
+**/__pycache__/
+**/*.py[cod]
+services/python_service/.venv/
+services/python_service/storage/
+
+# package managers / caches
+.pnpm-store/
+.turbo/
+coverage/
+dist/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.code-workspace
+
+# logs
+logs/
+*.log
+
+# local env overrides (explicit)
+.env.local
+.env.*.local

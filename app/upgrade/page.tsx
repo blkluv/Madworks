@@ -9,9 +9,9 @@ export default function UpgradePage() {
   const router = useRouter()
   return (
     <div className="min-h-screen text-zinc-100">
-      <div className="container mx-auto px-4 py-6">
+      <div className="container mx-auto px-4 pt-4 pb-16">
         {/* Reuse the same header/menu from the homepage by rendering HomePage header-only would be complex; we keep global header from layout */}
-        <div className="text-center mb-10">
+        <div className="text-center mb-8">
           <div className="inline-flex items-center gap-3 mb-4">
             <div className="p-4 bg-zinc-900/60 border border-zinc-800 rounded-2xl backdrop-blur">
               <Crown className="w-8 h-8 text-zinc-200" />
@@ -26,7 +26,7 @@ export default function UpgradePage() {
         <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
           <Card className="bg-zinc-950/80 border border-zinc-900 rounded-3xl p-8 backdrop-blur flex flex-col">
             <div className="mb-6">
-              <h3 className="text-xl font-bold mb-1">Bascc</h3>
+              <h3 className="text-xl font-bold mb-1">Basic</h3>
               <div className="text-3xl font-bold">$0</div>
               <div className="text-zinc-400">per month</div>
             </div>

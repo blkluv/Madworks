@@ -31,7 +31,7 @@ html {
       <body className="text-zinc-100">
         <AuthProvider>
           <AppProvider>
-            <div className="relative h-screen flex flex-col overflow-hidden">
+            <div className="relative min-h-screen flex flex-col">
               {/* Global subtle background gradient (behind everything, including header) */}
               <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
                 {/* Subtle marble texture overlay */}

@@ -162,9 +162,9 @@ export function PremiumTemplatesView() {
 
       {/* Premium Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-slate-700/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg">
+        <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-2xl shadow-sm">
+            <div className="p-3 bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl shadow-sm">
               <Code className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -173,7 +173,7 @@ export function PremiumTemplatesView() {
             </div>
           </div>
         </Card>
-        <Card className="bg-slate-700/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg">
+        <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-2xl shadow-sm">
               <Zap className="w-5 h-5 text-white" />
@@ -184,9 +184,9 @@ export function PremiumTemplatesView() {
             </div>
           </div>
         </Card>
-        <Card className="bg-slate-700/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg">
+        <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl shadow-sm">
+            <div className="p-3 bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl shadow-sm">
               <Download className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -195,7 +195,7 @@ export function PremiumTemplatesView() {
             </div>
           </div>
         </Card>
-        <Card className="bg-slate-700/80 backdrop-blur-sm p-6 rounded-2xl shadow-lg">
+        <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-gradient-to-br from-pink-500 to-pink-600 rounded-2xl shadow-sm">
               <TrendingUp className="w-5 h-5 text-white" />
@@ -209,7 +209,7 @@ export function PremiumTemplatesView() {
       </div>
 
       {/* Filter Bar */}
-      <Card className="bg-slate-800/90 backdrop-blur-sm p-6 rounded-2xl shadow-lg">
+      <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="flex items-center gap-3">
@@ -217,7 +217,7 @@ export function PremiumTemplatesView() {
               <select
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-4 py-2 bg-slate-700/80 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all duration-300 rounded-2xl"
+                className="px-4 py-2 bg-zinc-900/70 border border-zinc-800 text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300 rounded-2xl"
               >
                 {categories.map((category) => (
                   <option key={category.value} value={category.value}>
@@ -231,7 +231,7 @@ export function PremiumTemplatesView() {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
-                className="px-4 py-2 bg-slate-700/80 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all duration-300 rounded-2xl"
+                className="px-4 py-2 bg-zinc-900/70 border border-zinc-800 text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300 rounded-2xl"
               >
                 {sortOptions.map((option) => (
                   <option key={option.value} value={option.value}>
@@ -257,7 +257,7 @@ export function PremiumTemplatesView() {
           {mockDeveloperTemplates.map((template) => (
             <Card
               key={template.id}
-              className="bg-slate-800/90 backdrop-blur-sm p-6 hover:bg-slate-700/90 transition-all duration-500 hover:shadow-2xl hover:shadow-indigo-500/15 rounded-2xl relative overflow-hidden"
+              className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 hover:bg-zinc-900/80 transition-all duration-500 hover:shadow-2xl hover:shadow-indigo-500/15 rounded-2xl relative overflow-hidden"
             >
               {template.featured && (
                 <div className="absolute top-4 right-4 bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-lg z-10">
@@ -271,7 +271,7 @@ export function PremiumTemplatesView() {
                   alt={template.title}
                   className="w-full h-48 object-cover rounded-xl shadow-lg"
                 />
-                <div className="absolute top-3 left-3 bg-slate-700/90 backdrop-blur-sm px-2 py-1 rounded-full text-xs font-bold text-emerald-400">
+                <div className="absolute top-3 left-3 bg-zinc-900/90 backdrop-blur px-2 py-1 rounded-full text-xs font-bold text-emerald-400 border border-zinc-800">
                   {template.score}
                 </div>
                 <div className="absolute top-3 right-3 bg-gradient-to-r from-yellow-500 to-yellow-600 text-white px-2 py-1 rounded-full text-xs font-bold shadow-lg">
@@ -297,7 +297,7 @@ export function PremiumTemplatesView() {
 
                 <div className="flex flex-wrap gap-2">
                   {template.tags.slice(0, 3).map((tag) => (
-                    <span key={tag} className="px-2 py-1 bg-slate-700 text-indigo-300 text-xs rounded-full">
+                    <span key={tag} className="px-2 py-1 bg-zinc-800 text-indigo-300 text-xs rounded-full border border-zinc-700/60">
                       {tag}
                     </span>
                   ))}
@@ -310,7 +310,7 @@ export function PremiumTemplatesView() {
                       <span>{template.likes}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Download className="w-4 h-4 text-blue-400" />
+                      <Download className="w-4 h-4 text-indigo-400" />
                       <span>{template.downloads}</span>
                     </div>
                     <div className="flex items-center gap-1">
@@ -331,7 +331,7 @@ export function PremiumTemplatesView() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="bg-slate-700 text-gray-300 hover:bg-slate-600 rounded-2xl transition-all duration-300"
+                    className="bg-zinc-900 text-gray-300 hover:bg-zinc-800 border border-zinc-800 rounded-2xl transition-all duration-300"
                   >
                     <Heart className="w-4 h-4" />
                   </Button>
@@ -355,7 +355,7 @@ export function PremiumTemplatesView() {
           {mockAITemplates.map((template) => (
             <Card
               key={template.id}
-              className="bg-slate-800/90 backdrop-blur-sm p-6 hover:bg-slate-700/90 transition-all duration-500 hover:shadow-2xl hover:shadow-emerald-500/15 rounded-2xl relative overflow-hidden"
+              className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 hover:bg-zinc-900/80 transition-all duration-500 hover:shadow-2xl hover:shadow-emerald-500/15 rounded-2xl relative overflow-hidden"
             >
               <div className="relative mb-4">
                 <img
@@ -363,7 +363,7 @@ export function PremiumTemplatesView() {
                   alt={template.title}
                   className="w-full h-48 object-cover rounded-xl shadow-lg"
                 />
-                <div className="absolute top-3 left-3 bg-slate-700/90 backdrop-blur-sm px-2 py-1 rounded-full text-xs font-bold text-emerald-400">
+                <div className="absolute top-3 left-3 bg-zinc-900/90 backdrop-blur px-2 py-1 rounded-full text-xs font-bold text-emerald-400 border border-zinc-800">
                   {template.score}
                 </div>
                 <div className="absolute top-3 right-3 bg-gradient-to-r from-emerald-500 to-emerald-600 text-white px-2 py-1 rounded-full text-xs font-bold shadow-lg">
@@ -387,7 +387,7 @@ export function PremiumTemplatesView() {
 
                 <div className="flex flex-wrap gap-2">
                   {template.tags.slice(0, 3).map((tag) => (
-                    <span key={tag} className="px-2 py-1 bg-slate-700 text-emerald-300 text-xs rounded-full">
+                    <span key={tag} className="px-2 py-1 bg-zinc-800 text-emerald-300 text-xs rounded-full border border-zinc-700/60">
                       {tag}
                     </span>
                   ))}
@@ -400,7 +400,7 @@ export function PremiumTemplatesView() {
                       <span>{template.likes}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <Download className="w-4 h-4 text-blue-400" />
+                      <Download className="w-4 h-4 text-emerald-400" />
                       <span>{template.downloads}</span>
                     </div>
                     <div className="flex items-center gap-1">
@@ -421,7 +421,7 @@ export function PremiumTemplatesView() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="bg-slate-700 text-gray-300 hover:bg-slate-600 rounded-2xl transition-all duration-300"
+                    className="bg-zinc-900 text-gray-300 hover:bg-zinc-800 border border-zinc-800 rounded-2xl transition-all duration-300"
                   >
                     <Heart className="w-4 h-4" />
                   </Button>

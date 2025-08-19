@@ -25,6 +25,48 @@ export function HomeView() {
       <div className="max-w-3xl mx-auto">
         <HomeChatBox />
       </div>
+
+      {/* Info Section */}
+      <div className="max-w-6xl mx-auto pt-12">
+        <div className="text-center mb-8">
+          <h2 className="text-2xl font-bold text-white mb-2">How Madworks AI helps you</h2>
+          <p className="text-zinc-300 max-w-3xl mx-auto">
+            Upload a product image, describe your goal, and instantly generate polished, on‑brand ads across sizes and formats.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <Card className="bg-zinc-950/80 border border-zinc-900 rounded-2xl p-6">
+            <div className="flex items-start gap-3">
+              <Zap className="w-5 h-5 text-emerald-400 mt-1" />
+              <div>
+                <h3 className="text-white font-semibold">AI Copy & Layout</h3>
+                <p className="text-zinc-400 text-sm">Smart copy, emphasis, and layout optimized for legibility and conversions.</p>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="bg-zinc-950/80 border border-zinc-900 rounded-2xl p-6">
+            <div className="flex items-start gap-3">
+              <TrendingUp className="w-5 h-5 text-pink-400 mt-1" />
+              <div>
+                <h3 className="text-white font-semibold">Multiple Sizes</h3>
+                <p className="text-zinc-400 text-sm">Generate consistent variants for square, vertical, and horizontal placements.</p>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="bg-zinc-950/80 border border-zinc-900 rounded-2xl p-6">
+            <div className="flex items-start gap-3">
+              <Shield className="w-5 h-5 text-indigo-400 mt-1" />
+              <div>
+                <h3 className="text-white font-semibold">On‑brand Controls</h3>
+                <p className="text-zinc-400 text-sm">Override text color, choose panel side, and fine‑tune layouts with preferences.</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
     </div>
   )
 }
