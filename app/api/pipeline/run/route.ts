@@ -97,14 +97,18 @@ export async function POST(req: Request) {
   let text_color_override: string | undefined;
 
   try {
-    // Try to parse as multipart first
+    // Decide parsing mode by Content-Type
+    const contentType = (req.headers.get("content-type") || "").toLowerCase();
+    const isMultipart = contentType.includes("multipart/form-data");
     let form: FormData | null = null;
-    try {
-      form = await req.formData();
-    } catch (_) {
-      form = null;
+    if (isMultipart) {
+      try {
+        form = await req.formData();
+      } catch (_) {
+        form = null;
+      }
     }
-    if (form) {
+    if (isMultipart && form) {
       prompt = String(form.get("prompt") || "");
       tone = form.get("tone") ? String(form.get("tone")) : undefined;
       platform = form.get("platform") ? String(form.get("platform")) : undefined;

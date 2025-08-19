@@ -1,0 +1,55 @@
+"use client"
+
+import { Suspense, useState, useEffect } from "react"
+import { useSearchParams } from "next/navigation"
+import { HomeView } from "@/components/home-view"
+import { PremiumTemplatesView } from "@/components/premium-templates-view"
+import { ProjectsView } from "@/components/projects-view"
+import { ChatView } from "@/components/chat-view"
+
+type ViewType = "home" | "projects" | "gallery" | "premium" | "chat"
+
+function HomeContent() {
+  return (
+    <div className={`h-full min-h-0 text-zinc-100 relative overflow-x-hidden`}>
+      <Suspense fallback={
+        <div className="flex items-center justify-center h-full">
+          <div className="animate-pulse">Loading...</div>
+        </div>
+      }>
+        <HomeContentInner />
+      </Suspense>
+    </div>
+  )
+}
+
+function HomeContentInner() {
+  const searchParams = useSearchParams()
+  const [currentView, setCurrentView] = useState<ViewType>(() => {
+    const v = (searchParams.get("view") as ViewType) || "home"
+    return v
+  })
+
+  // Sync view from ?view= query param
+  useEffect(() => {
+    const v = (searchParams.get("view") as ViewType) || "home"
+    setCurrentView(v)
+  }, [searchParams])
+
+  return (
+    <div className="relative z-10 h-full min-h-0 flex flex-col">
+      {currentView === "chat" ? (
+        // Full-bleed chat dashboard
+        <ChatView />
+      ) : (
+        <div className="container mx-auto px-4 pt-8 pb-8">
+          {currentView === "home" && <HomeView />}
+          {currentView === "projects" && <ProjectsView />}
+          {currentView === "gallery" && <PremiumTemplatesView />}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default HomeContent
