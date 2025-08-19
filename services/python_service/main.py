@@ -492,11 +492,13 @@ def _resolve_img_href(analysis: Dict[str, Any]) -> str:
                 logger.warning(f"HTTP fetch failed for original image: {e}")
     return ""
 
-def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any]) -> str:
-    """Create SVG composition with a fixed, professional layout and support for emphasis tspans.
+def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any], *, smart_layout: bool = True, panel_side_override: Optional[str] = None) -> str:
+    """Create SVG composition with a professional layout and support for emphasis tspans.
     - Full-bleed background image with strong legibility gradient
-    - Left-aligned headline and subheadline with optional emphasis ranges rendered as bold tspans
-    - Bottom-left CTA button
+    - Smart left/right text panel selection (if smart_layout) based on subject position
+    - Optional explicit panel override via panel_side_override ('left'|'right') taking precedence
+    - Headline and subheadline with emphasis ranges rendered as bold tspans
+    - CTA button positioned within the chosen text panel area
     """
 
     # Layout metrics
@@ -540,11 +542,39 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         # Ignore malformed recs
         pass
 
-    # CTA sizing and placement (bottom-left)
+    # Determine panel side: explicit override > smart layout > default left
+    panel_side = "left"
+    try:
+        override = (panel_side_override or "").strip().lower() if isinstance(panel_side_override, str) else None
+        if override in ("left", "right"):
+            panel_side = override
+        elif smart_layout:
+            bbox = analysis.get("foreground_bbox") or None
+            orig_size = analysis.get("original_size") or None
+            if bbox and isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                if orig_size and isinstance(orig_size, (list, tuple)) and len(orig_size) == 2:
+                    W0 = max(1, int(orig_size[0]))
+                    H0 = max(1, int(orig_size[1]))
+                else:
+                    # Fallback to crop size
+                    W0, H0 = width, height
+                cx = (float(bbox[0]) + float(bbox[2])) / 2.0
+                # Normalized horizontal position in original image
+                nx = cx / float(W0)
+                # If subject on left half, place panel on right, else on left
+                panel_side = "right" if nx < 0.5 else "left"
+    except Exception:
+        pass
+
+    # Panel width and inner text start x
+    text_panel_w = int(width * 0.62)
+    text_x = padding if panel_side == "left" else (width - text_panel_w + padding)
+
+    # CTA sizing and placement inside the chosen panel
     cta_text = copy_data.get("cta", "Learn More")
     cta_width = max(200, int(44 + len(cta_text) * 11))
     cta_height = max(52, int(min(width, height) * 0.055))
-    cta_x = padding
+    cta_x = text_x
     cta_y = height - padding - cta_height
     cta_text_x = cta_x + cta_width // 2
     cta_text_y = cta_y + int(cta_height * 0.66)
@@ -552,10 +582,10 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     # Colors / accents
     palette = analysis.get("palette", [])
     cta_color = palette[2] if len(palette) > 2 else "#2563EB"  # blue
-    text_panel_w = int(width * 0.62)
 
     # Text wrapping (word-safe) and dynamic fitting
-    content_width = width - 2 * padding
+    # Restrict content width to the text panel area
+    content_width = max(200, int(text_panel_w - 2 * padding))
     headline = copy_data.get("headline", "").strip()
     subheadline = copy_data.get("subheadline", "").strip()
 
@@ -690,6 +720,55 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             sub_size,
         ) = best
 
+    # After fitting, optionally nudge vertical start to avoid overlapping with the foreground bbox
+    try:
+        if smart_layout:
+            bbox = analysis.get("foreground_bbox") or None
+            orig_size = analysis.get("original_size") or None
+            if bbox and isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                if orig_size and isinstance(orig_size, (list, tuple)) and len(orig_size) == 2:
+                    W0 = max(1, int(orig_size[0]))
+                    H0 = max(1, int(orig_size[1]))
+                else:
+                    W0, H0 = width, height
+                # Map original bbox to canvas under preserveAspectRatio="xMidYMid slice"
+                s = max(width / float(W0), height / float(H0))
+                w1 = W0 * s
+                h1 = H0 * s
+                off_x = (width - w1) / 2.0
+                off_y = (height - h1) / 2.0
+                bx0 = bbox[0] * s + off_x
+                by0 = bbox[1] * s + off_y
+                bx1 = bbox[2] * s + off_x
+                by1 = bbox[3] * s + off_y
+
+                # Approx text block bounds
+                tx0 = text_x
+                tx1 = text_x + content_width
+                ty0 = headline_y_start - int(0.85 * headline_size)
+                ty1 = subheadline_y_start + sub_block_h
+
+                def _overlap(a0, a1, b0, b1):
+                    return max(0, min(a1, b1) - max(a0, b0))
+
+                inter_w = _overlap(tx0, tx1, bx0, bx1)
+                inter_h = _overlap(ty0, ty1, by0, by1)
+                inter_area = inter_w * inter_h
+                text_area = (tx1 - tx0) * max(1, (ty1 - ty0))
+                if inter_area > 0 and text_area > 0 and (inter_area / float(text_area)) > 0.12:
+                    # Nudge text block down, just below the subject bbox
+                    desired_top = int(by1 + height * 0.03)
+                    delta = max(0, desired_top - ty0)
+                    # Clamp so we don't collide with CTA zone
+                    max_delta = max(0, (safe_bottom - sub_block_h) - ty0)
+                    delta = int(min(delta, max_delta))
+                    if delta > 0:
+                        headline_y_start += delta
+                        subheadline_y_start += delta
+    except Exception:
+        # Non-fatal; keep fitted positions
+        pass
+
     # SVG template with legibility gradient (applied only when an image exists) and a clean fallback background
     svg_template = """
     <svg width="{{ width }}" height="{{ height }}" viewBox="0 0 {{ width }} {{ height }}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
@@ -700,6 +779,10 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 <stop offset="100%" stop-color="#000000" stop-opacity="0.08" />
             </linearGradient>
             <linearGradient id="shadeLeft" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#000000" stop-opacity="0.55" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
+            </linearGradient>
+            <linearGradient id="shadeRight" x1="100%" y1="0%" x2="0%" y2="0%">
                 <stop offset="0%" stop-color="#000000" stop-opacity="0.55" />
                 <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
             </linearGradient>
@@ -723,12 +806,16 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
         <!-- Content -->
         <g>
-            <!-- Stronger left-side scrim for text legibility -->
+            <!-- Stronger side scrim for text legibility -->
+            {% if panel_side == 'left' %}
             <rect x="0" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shadeLeft)" />
+            {% else %}
+            <rect x="{{ width - text_panel_w }}" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shadeRight)" />
+            {% endif %}
             <!-- Headline with emphasis tspans -->
-            <text x="{{ padding }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{{ text_color }}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)">
+            <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{{ text_color }}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)">
                 {% for line in headline_segments %}
-                <tspan x="{{ padding }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">
+                <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">
                     {% for seg in line %}
                     <tspan{% if seg.style == 'bold' %} font-weight="800"{% endif %}>{{ seg.text | e }}</tspan>
                     {% endfor %}
@@ -737,9 +824,9 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             </text>
 
             <!-- Subheadline -->
-            <text x="{{ padding }}" y="{{ subheadline_y_start }}" font-family="{{ font_family_body }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" filter="url(#shadow)">
+            <text x="{{ text_x }}" y="{{ subheadline_y_start }}" font-family="{{ font_family_body }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" filter="url(#shadow)">
                 {% for line in sub_segments %}
-                <tspan x="{{ padding }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">
+                <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">
                     {% for seg in line %}
                     <tspan{% if seg.style == 'bold' %} font-weight="700"{% endif %}>{{ seg.text | e }}</tspan>
                     {% endfor %}
@@ -780,6 +867,8 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         sub_gap=sub_gap,
         headline_y_start=headline_y_start,
         subheadline_y_start=subheadline_y_start,
+        panel_side=panel_side,
+        text_x=text_x,
         cta_x=cta_x,
         cta_y=cta_y,
         cta_width=cta_width,
@@ -979,6 +1068,8 @@ async def ingest_analyze(image: UploadFile = File(...)):
         result["original_url"] = original_url_http
         result["original_url_internal"] = original_url_internal
         result["original_data_url"] = original_data_url
+        # Provide original image size to enable correct coordinate mapping in composition
+        result["original_size"] = [int(pil_image.width), int(pil_image.height)]
         return result
         
     except Exception as e:
@@ -1055,7 +1146,18 @@ async def compose(payload: Dict[str, Any]):
             crop_info = {"width": 1080, "height": 1080}
         
         # Create SVG composition using original image URL from analysis
-        svg_content = create_svg_composition(copy_data, analysis, crop_info)
+        smart_layout = bool(payload.get("smart_layout", True))
+        panel_side_raw = payload.get("panel_side")
+        panel_side = panel_side_raw.strip().lower() if isinstance(panel_side_raw, str) else None
+        if panel_side not in ("left", "right"):
+            panel_side = None
+        svg_content = create_svg_composition(
+            copy_data,
+            analysis,
+            crop_info,
+            smart_layout=smart_layout,
+            panel_side_override=panel_side,
+        )
         
         # Generate composition ID
         composition_id = f"comp_{hash(svg_content) % 1000000}"

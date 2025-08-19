@@ -162,6 +162,11 @@ export function ChatView() {
     { value: "16:9", label: "Landscape (16:9)", desc: "YouTube, Web Hero" },
   ]
 
+  // Detect when the user likely intended to reference/attach an image
+  const imageIntentRegex = /(\b(this|that|the|my)\s+(image|picture|photo|screenshot|pic)\b)|(\battach(ed)?\b)|(\b(upload|use)\s+(this|the)\s+(image|picture|photo|screenshot|pic)\b)|(\b\w+\.(png|jpe?g|webp|gif)\b)/i
+  const mentionsImage = (text: string) => imageIntentRegex.test(text || "")
+  const hasPreviousImage = (conv: Conversation) => !!(conv?.analysis || conv?.messages?.some(m => m.attachments?.some(a => a.type === 'image')))
+
   const applySuggestion = (s: string) => {
     setInput((prev) => {
       if (!prev) return s
@@ -220,21 +225,48 @@ export function ChatView() {
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault()
     const isFirst = (activeConv?.messages?.length || 0) === 0
-    // Enforce: first message must have BOTH image + prompt
+    const wantsImage = mentionsImage(input)
+    // First message: require prompt, and require image, but give a helpful hint if missing
     if (isFirst) {
-      if (!imageFile || !input.trim()) {
+      if (!input.trim()) {
         updateActive((c) => ({
           ...c,
           messages: [
             ...c.messages,
-            { id: `m_${Date.now()}`, role: 'assistant', content: "Please attach an image and enter a prompt to start a new ad.", timestamp: new Date().toISOString() },
+            { id: `m_${Date.now()}`, role: 'assistant', content: "Please enter a prompt (and attach an image) to start a new ad.", timestamp: new Date().toISOString() },
           ],
         }))
+        return
+      }
+      if (!imageFile) {
+        const msg = wantsImage
+          ? "It sounds like you're referring to an image (e.g., 'this picture'), but no image is attached. Click the paperclip to attach an image."
+          : "Please attach an image to start a new ad. Click the paperclip to upload."
+        updateActive((c) => ({
+          ...c,
+          messages: [
+            ...c.messages,
+            { id: `m_${Date.now()}`, role: 'assistant', content: msg, timestamp: new Date().toISOString() },
+          ],
+        }))
+        try { fileInputRef.current?.click() } catch {}
         return
       }
     } else {
       // Subsequent messages require at least a prompt
       if (!input.trim()) return
+      // If user references an image but there's none in this chat yet, prompt to attach
+      if (!imageFile && wantsImage && !hasPreviousImage(activeConv)) {
+        updateActive((c) => ({
+          ...c,
+          messages: [
+            ...c.messages,
+            { id: `m_${Date.now()}`, role: 'assistant', content: "You mentioned an image, but none is attached in this chat yet. Please attach one with the paperclip.", timestamp: new Date().toISOString() },
+          ],
+        }))
+        try { fileInputRef.current?.click() } catch {}
+        return
+      }
     }
 
     const userMessage: Message = {
@@ -261,6 +293,11 @@ export function ChatView() {
       if (!imageFile && activeConv?.analysis) {
         try { form.append("analysis", JSON.stringify(activeConv.analysis)) } catch {}
       }
+      // Always forward conversation history for better context when composing
+      try {
+        const history = activeConv.messages.map((m) => ({ role: m.role, content: m.content }))
+        form.append("history", JSON.stringify(history))
+      } catch {}
       if (platform) form.append("platform", platform)
       if (tone) form.append("tone", tone)
       form.append("num_variants", String(variants || 1))
@@ -647,7 +684,7 @@ export function ChatView() {
                     {/* Send */}
                     <button
                       type="submit"
-                      disabled={busy || (activeConv.messages.length === 0 ? (!input.trim() || !imageFile) : (!input.trim()))}
+                      disabled={busy || !input.trim()}
                       className="relative w-12 h-12 rounded-full flex items-center justify-center text-white disabled:opacity-60"
                       title="Send"
                     >
