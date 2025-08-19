@@ -94,6 +94,7 @@ export async function POST(req: Request) {
   let imageFile: File | undefined;
   let sizes: Array<{ name?: string; width: number; height: number }> | null = null;
   let history: Array<{ role: string; content: string }> | null = null;
+  let text_color_override: string | undefined;
 
   try {
     // Try to parse as multipart first
@@ -114,6 +115,10 @@ export async function POST(req: Request) {
       const maybeFile = form.get("image");
       if (maybeFile && maybeFile instanceof File) {
         imageFile = maybeFile;
+      }
+      const tco = form.get("text_color_override");
+      if (typeof tco === "string" && tco.trim()) {
+        text_color_override = tco.trim();
       }
       const sizesRaw = form.get("sizes");
       if (sizesRaw && typeof sizesRaw === "string") {
@@ -153,6 +158,9 @@ export async function POST(req: Request) {
       temperature = json.temperature ?? 0.7;
       crop_width = json.crop_width ?? 1080;
       crop_height = json.crop_height ?? 1080;
+      if (typeof json.text_color_override === "string" && json.text_color_override.trim()) {
+        text_color_override = json.text_color_override.trim();
+      }
       if (Array.isArray(json.sizes)) {
         sizes = json.sizes
           .map((s: any) => ({ name: s?.name, width: Number(s?.width), height: Number(s?.height) }))
@@ -254,6 +262,7 @@ export async function POST(req: Request) {
           copy: v,
           analysis: analysis || {},
           crop_info: { width: s.width, height: s.height },
+          ...(text_color_override ? { text_color_override } : {}),
         };
         const comp = await fetchJson(
           `${PIPELINE_URL}/compose`,

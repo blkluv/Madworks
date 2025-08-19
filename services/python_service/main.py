@@ -492,7 +492,45 @@ def _resolve_img_href(analysis: Dict[str, Any]) -> str:
                 logger.warning(f"HTTP fetch failed for original image: {e}")
     return ""
 
-def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any], *, smart_layout: bool = True, panel_side_override: Optional[str] = None) -> str:
+def _normalize_hex_color(c: Optional[str]) -> Optional[str]:
+    """Normalize a CSS hex color string to #rrggbb. Returns None if invalid.
+    Accepts #rgb or #rrggbb (case-insensitive), with or without leading '#'."""
+    try:
+        if not isinstance(c, str):
+            return None
+        s = c.strip()
+        if not s:
+            return None
+        if s.startswith('#'):
+            s = s[1:]
+        # Allow 3 or 6 hex digits
+        if len(s) == 3 and all(ch in '0123456789abcdefABCDEF' for ch in s):
+            s = ''.join(ch * 2 for ch in s)
+        if len(s) == 6 and all(ch in '0123456789abcdefABCDEF' for ch in s):
+            return '#' + s.lower()
+        return None
+    except Exception:
+        return None
+
+def _derive_secondary_color(base_hex: str) -> str:
+    """Derive a legible secondary text color from the primary hex.
+    Heuristic: if the base is bright, darken ~15%; otherwise, lighten ~15%."""
+    try:
+        h = _normalize_hex_color(base_hex) or '#ffffff'
+        r = int(h[1:3], 16)
+        g = int(h[3:5], 16)
+        b = int(h[5:7], 16)
+        # Perceived brightness
+        brightness = (r * 299 + g * 587 + b * 114) / 1000.0
+        factor = 0.85 if brightness > 140 else 1.15
+        nr = max(0, min(255, int(r * factor)))
+        ng = max(0, min(255, int(g * factor)))
+        nb = max(0, min(255, int(b * factor)))
+        return f"#{nr:02x}{ng:02x}{nb:02x}"
+    except Exception:
+        return '#e5e5e5'
+
+def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any], *, smart_layout: bool = True, panel_side_override: Optional[str] = None, text_color_override: Optional[str] = None) -> str:
     """Create SVG composition with a professional layout and support for emphasis tspans.
     - Full-bleed background image with strong legibility gradient
     - Smart left/right text panel selection (if smart_layout) based on subject position
@@ -511,6 +549,16 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     sub_size = max(18, int(min(width, height) * 0.035))
     text_color = "#ffffff"
     text_color_secondary = "#e5e5e5"
+
+    # Apply sanitized text color override if provided
+    try:
+        if text_color_override:
+            norm = _normalize_hex_color(text_color_override)
+            if norm:
+                text_color = norm
+                text_color_secondary = _derive_secondary_color(norm)
+    except Exception:
+        pass
 
     # Recommended fonts from structured copy (backward compatible)
     # Defaults
@@ -1151,12 +1199,15 @@ async def compose(payload: Dict[str, Any]):
         panel_side = panel_side_raw.strip().lower() if isinstance(panel_side_raw, str) else None
         if panel_side not in ("left", "right"):
             panel_side = None
+        raw_tco = payload.get("text_color_override")
+        tco = _normalize_hex_color(raw_tco) if isinstance(raw_tco, str) else None
         svg_content = create_svg_composition(
             copy_data,
             analysis,
             crop_info,
             smart_layout=smart_layout,
             panel_side_override=panel_side,
+            text_color_override=tco,
         )
         
         # Generate composition ID

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
 import { PlusCircle, Paperclip, Image as ImageIcon, Send, SlidersHorizontal } from "lucide-react"
 import { useApp } from "@/components/app-context"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
@@ -121,6 +122,7 @@ export function ChatView() {
   const [platform, setPlatform] = useState<"" | "instagram" | "facebook" | "linkedin" | "x">("")
   const [tone, setTone] = useState<"" | "bold" | "friendly" | "professional" | "minimal">("")
   const [variants, setVariants] = useState<number>(3)
+  const [textColorOverride, setTextColorOverride] = useState<string>("")
   const [recommendation, setRecommendation] = useState<{
     headline: string
     subheadline: string
@@ -302,6 +304,7 @@ export function ChatView() {
       if (tone) form.append("tone", tone)
       form.append("num_variants", String(variants || 1))
       try { form.append("sizes", JSON.stringify(sizesForAspect(selectedAspectRatio))) } catch {}
+      if (textColorOverride && textColorOverride.trim()) form.append("text_color_override", textColorOverride.trim())
 
       const res = await fetch("/api/pipeline/run", { method: "POST", body: form })
       if (!res.ok) {
@@ -677,6 +680,28 @@ export function ChatView() {
                                 ))}
                               </SelectContent>
                             </Select>
+                          </div>
+                          <div>
+                            <div className="text-xs text-zinc-400 mb-1">Text color override</div>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="text"
+                                inputMode="text"
+                                placeholder="#ffffff"
+                                value={textColorOverride}
+                                onChange={(e) => setTextColorOverride(e.target.value)}
+                                className="h-8"
+                              />
+                              <input
+                                type="color"
+                                value={/^#([0-9a-fA-F]{6})$/.test(textColorOverride || "") ? textColorOverride : "#ffffff"}
+                                onChange={(e) => setTextColorOverride(e.target.value)}
+                                aria-label="Pick color"
+                                className="h-8 w-8 rounded border border-zinc-800 bg-transparent p-0"
+                                style={{ padding: 0 }}
+                              />
+                            </div>
+                            <div className="text-[10px] text-zinc-500 mt-1">Optional. Hex like #ffffff or #fff</div>
                           </div>
                         </div>
                       </PopoverContent>
