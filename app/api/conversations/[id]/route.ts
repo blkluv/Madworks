@@ -26,24 +26,26 @@ const store: Map<string, Conversation[]> = (globalThis as any).__conv_store__ ||
 // @ts-ignore
 if (!(globalThis as any).__conv_store__) (globalThis as any).__conv_store__ = store;
 
-export async function GET(_: Request, ctx: { params: { id: string } }) {
+export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const email = session.user.email as string;
+  const { id } = await ctx.params;
   const list = store.get(email) || [];
-  const conv = list.find((c) => c.id === ctx.params.id);
+  const conv = list.find((c) => c.id === id);
   if (!conv) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ conversation: conv });
 }
 
-export async function PUT(req: Request, ctx: { params: { id: string } }) {
+export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const email = session.user.email as string;
   const body = await req.json().catch(() => ({}));
   const now = new Date().toISOString();
+  const { id } = await ctx.params;
   const incoming: Conversation = {
-    id: String(ctx.params.id),
+    id: String(id),
     title: String(body?.title || "Untitled"),
     messages: Array.isArray(body?.messages) ? body.messages : [],
     createdAt: String(body?.createdAt || now),
@@ -57,12 +59,13 @@ export async function PUT(req: Request, ctx: { params: { id: string } }) {
   return NextResponse.json({ ok: true, conversation: incoming });
 }
 
-export async function DELETE(_: Request, ctx: { params: { id: string } }) {
+export async function DELETE(_: Request, ctx: { params: Promise<{ id: string }> }) {
   const session = await auth();
   if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const email = session.user.email as string;
+  const { id } = await ctx.params;
   const list = store.get(email) || [];
-  const next = list.filter((c) => c.id !== ctx.params.id);
+  const next = list.filter((c) => c.id !== id);
   store.set(email, next);
   return NextResponse.json({ ok: true });
 }

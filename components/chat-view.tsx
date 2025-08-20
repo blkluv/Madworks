@@ -418,18 +418,63 @@ export function ChatView() {
     persist()
   }, [conversations, activeId, session])
 
+  // Backup all conversations to localStorage so refreshes survive dev server resets
+  useEffect(() => {
+    try {
+      const key = `mw:conversations:${session?.user?.email || 'anon'}`
+      localStorage.setItem(key, JSON.stringify(conversations))
+    } catch {}
+  }, [conversations, session])
+
   // Load conversations for this user on mount/login
   useEffect(() => {
     const load = async () => {
       try {
-        if (!session) return
-        const res = await fetch('/api/conversations', { cache: 'no-store' })
-        if (!res.ok) return
-        const data = await res.json()
-        const list: Conversation[] = data?.conversations || []
-        if (list.length > 0) {
-          setConversations(list)
-          setActiveId(list[0].id)
+        let loaded = false
+        if (session) {
+          try {
+            const res = await fetch('/api/conversations', { cache: 'no-store' })
+            if (res.ok) {
+              const data = await res.json()
+              const list: Conversation[] = data?.conversations || []
+              if (list.length > 0) {
+                setConversations(list)
+                setActiveId(list[0].id)
+                loaded = true
+              }
+            }
+          } catch {}
+        }
+
+        if (!loaded) {
+          // Fallback: load from localStorage (also supports non-auth users)
+          try {
+            const key = `mw:conversations:${session?.user?.email || 'anon'}`
+            const raw = typeof window !== 'undefined' ? localStorage.getItem(key) : null
+            if (raw) {
+              const cached = JSON.parse(raw)
+              if (Array.isArray(cached) && cached.length > 0) {
+                setConversations(cached)
+                setActiveId(cached[0].id)
+                // If logged in, sync back to server in background
+                if (session) {
+                  ;(async () => {
+                    try {
+                      await Promise.allSettled(
+                        cached.slice(0, 10).map((c: Conversation) =>
+                          fetch(`/api/conversations/${c.id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(c),
+                          })
+                        )
+                      )
+                    } catch {}
+                  })()
+                }
+              }
+            }
+          } catch {}
         }
       } catch {}
     }
