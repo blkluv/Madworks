@@ -449,9 +449,9 @@ export function ChatView() {
       {/* Right: Chat */}
       <section className="flex-1 min-h-0 flex flex-col">
         {/* Messages & Collage */}
-        <div className="flex-1 min-h-0 overflow-y-auto chat-scrollbar p-8 space-y-8 mx-auto w-full max-w-7xl">
+        <div className="flex-1 min-h-0 overflow-y-auto chat-scrollbar p-8 space-y-8 w-full">
           {activeConv.messages.length === 0 && (
-            <div className="mx-auto max-w-3xl w-full">
+            <div className="w-full max-w-3xl">
               <div className="mt-2 grid sm:grid-cols-2 gap-4">
                 {suggestions.slice(0, 4).map((s, i) => (
                   <div key={i} className="relative group isolate">
@@ -554,7 +554,7 @@ export function ChatView() {
 
         {/* Composer */}
         <div className="p-4 bg-transparent shrink-0" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
-          <div className="mx-auto w-full max-w-7xl">
+          <div className="w-full">
             <div className="mb-2 flex justify-end">
               <CreditsPill variant="inline" />
             </div>

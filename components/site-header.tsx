@@ -58,8 +58,11 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("home")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'home' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'home' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
+                  {selectedView === 'home' && (
+                    <span className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0" />
+                  )}
                   <Home className="w-4 h-4 mr-2" /> Home
                 </Button>
                 <Button
@@ -67,8 +70,11 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("chat")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'chat' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'chat' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
+                  {selectedView === 'chat' && (
+                    <span className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0" />
+                  )}
                   <BookOpen className="w-4 h-4 mr-2" /> Create
                 </Button>
                 <Button
@@ -76,8 +82,11 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("projects")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'projects' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'projects' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
+                  {selectedView === 'projects' && (
+                    <span className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0" />
+                  )}
                   <Folder className="w-4 h-4 mr-2" /> Projects
                 </Button>
                 <Button
@@ -85,8 +94,11 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("gallery")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'gallery' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'gallery' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
+                  {selectedView === 'gallery' && (
+                    <span className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0" />
+                  )}
                   <BookOpen className="w-4 h-4 mr-2" /> Premium Templates
                 </Button>
               </div>
