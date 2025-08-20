@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button"
 import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useSession } from "next-auth/react"
-import { CreditsPill } from "@/components/credits-pill"
 import { useSearchParams } from "next/navigation"
 
 type ViewType = "home" | "projects" | "gallery" | "premium" | "chat"
@@ -59,7 +58,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("home")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'home' ? 'bg-indigo-600/80 text-white border-indigo-500 shadow-sm' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'home' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   <Home className="w-4 h-4 mr-2" /> Home
                 </Button>
@@ -68,7 +67,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("chat")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'chat' ? 'bg-indigo-600/80 text-white border-indigo-500 shadow-sm' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'chat' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   <BookOpen className="w-4 h-4 mr-2" /> Create
                 </Button>
@@ -77,7 +76,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("projects")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'projects' ? 'bg-indigo-600/80 text-white border-indigo-500 shadow-sm' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'projects' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   <Folder className="w-4 h-4 mr-2" /> Projects
                 </Button>
@@ -86,7 +85,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("gallery")}
                   variant="outline"
                   size="lg"
-                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'gallery' ? 'bg-indigo-600/80 text-white border-indigo-500 shadow-sm' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`rounded-xl px-6 py-3 font-semibold border ${selectedView === 'gallery' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   <BookOpen className="w-4 h-4 mr-2" /> Premium Templates
                 </Button>
@@ -95,14 +94,13 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
           </div>
 
           <div className="flex items-center gap-3 justify-self-end">
-            {/* Right cluster: Upgrade, Credits, User avatar */}
+            {/* Right cluster: Upgrade, User avatar */}
             <Button
               onClick={() => (window.location.href = "/upgrade")}
               className="h-12 px-5 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black shadow-lg shadow-yellow-500/25"
             >
               <Crown className="w-4 h-4 mr-2" /> Upgrade
             </Button>
-            <CreditsPill variant="inline" />
             <div className="relative" ref={dropdownRef}>
               <Button
                 size="icon"

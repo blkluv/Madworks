@@ -28,13 +28,6 @@ export function HomeView() {
 
       {/* Info Section */}
       <div className="max-w-6xl mx-auto pt-12">
-        <div className="text-center mb-8">
-          <h2 className="text-2xl font-bold text-white mb-2">How Madworks AI helps you</h2>
-          <p className="text-zinc-300 max-w-3xl mx-auto">
-            Upload a product image, describe your goal, and instantly generate polished, on‑brand ads across sizes and formats.
-          </p>
-        </div>
-
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           <Card className="bg-zinc-950/80 border border-zinc-900 rounded-2xl p-6">
             <div className="flex items-start gap-3">

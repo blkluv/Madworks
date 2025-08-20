@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { PlusCircle, Paperclip, Image as ImageIcon, Send, SlidersHorizontal } from "lucide-react"
 import { useApp } from "@/components/app-context"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
+import { CreditsPill } from "@/components/credits-pill"
 
 interface Message {
   id: string
@@ -405,7 +406,7 @@ export function ChatView() {
   }
 
   return (
-    <div className="h-full min-h-0 w-full bg-transparent overflow-hidden flex">
+    <div className="h-full min-h-0 w-full bg-transparent overflow-hidden flex pt-4 md:pt-6">
       {/* Left: Conversations */}
       <aside className="hidden md:flex w-[400px] lg:w-[480px] flex-col">
         <div className="p-3">
@@ -554,6 +555,9 @@ export function ChatView() {
         {/* Composer */}
         <div className="p-4 bg-transparent shrink-0" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
           <div className="mx-auto w-full max-w-7xl">
+            <div className="mb-2 flex justify-end">
+              <CreditsPill variant="inline" />
+            </div>
           {/* Advanced controls (hidden by default) */}
           {showOptions && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
