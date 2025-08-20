@@ -1,4 +1,6 @@
 import os
+import hashlib
+import random
 import asyncio
 import base64
 import io
@@ -530,7 +532,7 @@ def _derive_secondary_color(base_hex: str) -> str:
     except Exception:
         return '#e5e5e5'
 
-def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any], *, smart_layout: bool = True, panel_side_override: Optional[str] = None, text_color_override: Optional[str] = None) -> str:
+def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any], *, smart_layout: bool = True, panel_side_override: Optional[str] = None, text_color_override: Optional[str] = None, variant: Optional[Dict[str, Any]] = None) -> str:
     """Create SVG composition with a professional layout and support for emphasis tspans.
     - Full-bleed background image with strong legibility gradient
     - Smart left/right text panel selection (if smart_layout) based on subject position
@@ -544,9 +546,24 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     height = int(crop_info["height"]) if "height" in crop_info else 1080
     padding = max(40, int(min(width, height) * 0.06))
 
-    # Typography (scaled to canvas)
-    headline_size = max(36, int(min(width, height) * 0.11))
-    sub_size = max(18, int(min(width, height) * 0.035))
+    # Variation profile (seeded for deterministic diversity)
+    v: Dict[str, Any] = variant or {}
+    # Build a deterministic seed from copy if none provided
+    seed = v.get("seed")
+    if seed is None:
+        try:
+            basis = f"{copy_data.get('headline','')}|{copy_data.get('subheadline','')}|{copy_data.get('cta','')}"
+            seed = int(hashlib.sha256(basis.encode('utf-8')).hexdigest(), 16) % (2**32)
+        except Exception:
+            seed = None
+    rng = random.Random(seed) if seed is not None else random.Random()
+
+    # Typography (scaled to canvas) with mild variance
+    type_scale = v.get("type_scale")
+    if not isinstance(type_scale, (int, float)):
+        type_scale = rng.uniform(0.94, 1.10)
+    headline_size = max(36, int(min(width, height) * 0.11 * float(type_scale)))
+    sub_size = max(18, int(min(width, height) * 0.035 * float(type_scale)))
     text_color = "#ffffff"
     text_color_secondary = "#e5e5e5"
 
@@ -614,14 +631,30 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     except Exception:
         pass
 
-    # Panel width and inner text start x
-    text_panel_w = int(width * 0.62)
+    # Optional panel flip or override via variant
+    try:
+        if isinstance(v.get("flip_panel"), bool) and v.get("flip_panel") and not panel_side_override:
+            panel_side = "left" if panel_side == "right" else "right"
+        forced_side = v.get("panel_side")
+        if isinstance(forced_side, str) and forced_side.lower() in ("left", "right"):
+            panel_side = forced_side.lower()
+    except Exception:
+        pass
+
+    # Panel width and inner text start x with variance
+    panel_width_factor = v.get("panel_width_factor")
+    if not isinstance(panel_width_factor, (int, float)):
+        panel_width_factor = rng.uniform(0.56, 0.66)
+    text_panel_w = int(width * float(panel_width_factor))
     text_x = padding if panel_side == "left" else (width - text_panel_w + padding)
 
-    # CTA sizing and placement inside the chosen panel
+    # CTA sizing; final placement computed after text layout is fitted
     cta_text = copy_data.get("cta", "Learn More")
-    cta_width = max(200, int(44 + len(cta_text) * 11))
+    cta_width_mode = (v.get("cta_width_mode") or "auto").lower()
+    per_char = 13 if cta_width_mode == "wide" else 11
+    cta_width = max(200, int(44 + len(cta_text) * per_char))
     cta_height = max(52, int(min(width, height) * 0.055))
+    # placeholders; will be updated after text is fitted
     cta_x = text_x
     cta_y = height - padding - cta_height
     cta_text_x = cta_x + cta_width // 2
@@ -629,7 +662,33 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
     # Colors / accents
     palette = analysis.get("palette", [])
-    cta_color = palette[2] if len(palette) > 2 else "#2563EB"  # blue
+    accent_index = v.get("accent_index")
+    try:
+        if accent_index is None and isinstance(palette, list) and len(palette) >= 2:
+            # Prefer using one of top 3 accents if available
+            candidates = list(range(1, min(4, len(palette))))
+            accent_index = rng.choice(candidates) if candidates else 2
+        if isinstance(accent_index, int) and 0 <= accent_index < len(palette):
+            cta_color = palette[accent_index]
+        else:
+            cta_color = palette[2] if len(palette) > 2 else "#2563EB"
+    except Exception:
+        cta_color = palette[2] if len(palette) > 2 else "#2563EB"
+
+    # CTA style (fill/outline/pill)
+    cta_style = (v.get("cta_style") or "fill").lower()
+    if cta_style == "outline":
+        cta_fill = "none"
+        cta_stroke = cta_color
+        cta_stroke_opacity = 0.9
+    else:
+        cta_fill = cta_color
+        cta_stroke = "#ffffff"
+        cta_stroke_opacity = 0.12
+
+    cta_radius = 10
+    if cta_style == "pill":
+        cta_radius = max(14, int(cta_height / 2))
 
     # Text wrapping (word-safe) and dynamic fitting
     # Restrict content width to the text panel area
@@ -714,11 +773,15 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
         sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
 
-        # Space available before CTA
-        safe_bottom = cta_y - int(cta_height * 0.30)
+        # Reserve vertical space for CTA (height + desired gap) so text doesn't push it to the bottom
+        cta_gap_scale = v.get("cta_gap_scale")
+        if not isinstance(cta_gap_scale, (int, float)):
+            cta_gap_scale = rng.uniform(0.9, 1.2)
+        cta_gap = max(8, int(sub_size * 0.6 * float(cta_gap_scale)))
+        layout_limit = height - padding - cta_height - int(cta_height * 0.30) - cta_gap
         text_bottom = subheadline_y_start + sub_block_h
 
-        fits = text_bottom <= safe_bottom
+        fits = text_bottom <= layout_limit
         # Keep best-so-far if fits or first iteration
         if fits:
             best = (
@@ -804,34 +867,150 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 inter_area = inter_w * inter_h
                 text_area = (tx1 - tx0) * max(1, (ty1 - ty0))
                 if inter_area > 0 and text_area > 0 and (inter_area / float(text_area)) > 0.12:
-                    # Nudge text block down, just below the subject bbox
-                    desired_top = int(by1 + height * 0.03)
-                    delta = max(0, desired_top - ty0)
-                    # Clamp so we don't collide with CTA zone
-                    max_delta = max(0, (safe_bottom - sub_block_h) - ty0)
-                    delta = int(min(delta, max_delta))
-                    if delta > 0:
-                        headline_y_start += delta
-                        subheadline_y_start += delta
+                    # Decide direction: move up or down depending on free space
+                    margin = int(height * 0.03)
+                    safe_bottom_here = height - padding - int(cta_height * 0.30)
+                    room_above = max(0, (headline_y_start - int(0.85 * headline_size)) - padding)
+                    room_below = max(0, (safe_bottom_here - sub_block_h) - ty0)
+
+                    # Amount needed to clear overlap
+                    delta_down_need = max(0, int(by1 + margin) - ty0)
+                    delta_up_need = max(0, ty1 - int(by0 - margin))
+
+                    # Clamp by available room
+                    delta_down = min(delta_down_need, room_below)
+                    delta_up = min(delta_up_need, room_above)
+
+                    # Prefer the direction with more room; tie -> move up to avoid bottom crowding
+                    move_down = (room_below > room_above) and (delta_down > 0 or delta_up == 0)
+                    if move_down and delta_down > 0:
+                        headline_y_start += int(delta_down)
+                        subheadline_y_start += int(delta_down)
+                    elif delta_up > 0:
+                        headline_y_start -= int(delta_up)
+                        subheadline_y_start -= int(delta_up)
     except Exception:
         # Non-fatal; keep fitted positions
         pass
 
+    # Reflow: ensure there is room for CTA under subheadline. First try moving text up, then shrink as last resort.
+    try:
+        cta_gap = max(8, int(sub_size * 0.6))
+        safe_bottom = height - padding - int(cta_height * 0.30)
+        sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
+        needed_bottom = subheadline_y_start + sub_block_h + cta_gap + cta_height
+        if needed_bottom > safe_bottom:
+            # 1) Move block up if we have headroom
+            headroom_up = max(0, (headline_y_start - int(0.85 * headline_size)) - padding)
+            delta = min(headroom_up, needed_bottom - safe_bottom)
+            if delta > 0:
+                headline_y_start -= delta
+                subheadline_y_start -= delta
+                needed_bottom -= delta
+
+        # 2) If still overflowing, scale down text and re-wrap a few times
+        attempts = 0
+        while needed_bottom > safe_bottom and attempts < 5 and (headline_size > 30 or sub_size > 16):
+            attempts += 1
+            headline_size = max(30, int(headline_size * 0.94))
+            sub_size = max(16, int(sub_size * 0.94))
+            line_gap = int(headline_size * 0.28)
+            sub_gap = int(sub_size * 0.24)
+            max_chars_headline = _measure_chars_for_width(content_width, headline_size)
+            max_chars_sub = _measure_chars_for_width(content_width, sub_size)
+            headline_lines = _wrap_text(headline, max_chars_headline)
+            sub_lines = _wrap_text(subheadline, max_chars_sub)
+            headline_segments = _segments_by_line(headline, headline_lines, headline_ranges)
+            sub_segments = _segments_by_line(subheadline, sub_lines, sub_ranges)
+            headline_block_h = len(headline_segments) * headline_size + max(0, (len(headline_segments) - 1) * line_gap)
+            # keep headline_y_start anchored to padding
+            headline_y_start = padding + headline_size
+            subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
+            sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
+            needed_bottom = subheadline_y_start + sub_block_h + cta_gap + cta_height
+    except Exception:
+        # Best-effort: continue with current layout
+        pass
+
+    # Final CTA placement directly under subheadline block (not stuck at bottom)
+    try:
+        # recompute sub_block_h based on final segments and sizes
+        sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
+        # keep a small safe area above bottom to avoid looking pinned to the edge
+        safe_bottom = height - padding - int(cta_height * 0.30)
+        # center CTA inside text panel width; clamp within bounds
+        x_cand = text_x + (content_width - cta_width) / 2.0
+        cta_x = int(max(text_x, min(x_cand, text_x + content_width - cta_width)))
+        cta_gap_scale = v.get("cta_gap_scale")
+        if not isinstance(cta_gap_scale, (int, float)):
+            cta_gap_scale = 1.0
+        cta_gap = max(8, int(sub_size * 0.6 * float(cta_gap_scale)))
+        cta_y = subheadline_y_start + sub_block_h + cta_gap
+        # Clamp CTA within bounds if content is long
+        if cta_y + cta_height > safe_bottom:
+            cta_y = max(padding, safe_bottom - cta_height)
+        cta_text_x = cta_x + cta_width // 2
+        cta_text_y = cta_y + int(cta_height * 0.66)
+    except Exception:
+        # Best-effort; fallback values from earlier remain
+        pass
+
     # SVG template with legibility gradient (applied only when an image exists) and a clean fallback background
+    # Scrim/gradient strength variance
+    try:
+        shade_factor = v.get("shade_factor")
+        if not isinstance(shade_factor, (int, float)):
+            shade_factor = rng.uniform(0.9, 1.15)
+        def _clip(x: float, lo: float, hi: float) -> float:
+            return max(lo, min(hi, x))
+        shade_main_opacity = _clip(0.35 * float(shade_factor), 0.22, 0.55)
+        shade_mid_opacity = _clip(0.20 * float(shade_factor), 0.12, 0.35)
+        shade_end_opacity = _clip(0.08 * float(shade_factor), 0.04, 0.16)
+        side_shade_factor = v.get("side_shade_factor")
+        if not isinstance(side_shade_factor, (int, float)):
+            side_shade_factor = rng.uniform(0.9, 1.2)
+        side_shade_opacity = _clip(0.55 * float(side_shade_factor), 0.40, 0.70)
+    except Exception:
+        shade_main_opacity, shade_mid_opacity, shade_end_opacity, side_shade_opacity = 0.35, 0.20, 0.08, 0.55
+    try:
+        # If CTA still lands in bottom gutter, lift text block and CTA together
+        bottom_gutter = int(height * 0.12)
+        min_cta_top = height - bottom_gutter - cta_height
+        if cta_y > min_cta_top:
+            # Amount to lift to be just above gutter
+            lift = cta_y - min_cta_top
+            # Respect available headroom above
+            headroom = max(0, (headline_y_start - int(0.85 * headline_size)) - padding)
+            lift = min(lift, headroom)
+            if lift > 0:
+                headline_y_start -= lift
+                subheadline_y_start -= lift
+                cta_y -= lift
+                cta_text_y = cta_y + int(cta_height * 0.66)
+    except Exception:
+        pass
+
+    try:
+        logger.info(
+            f"layout: panel={panel_side} text_x={text_x} headline_y={headline_y_start} sub_y={subheadline_y_start} cta=({cta_x},{cta_y}) size=({width}x{height})"
+        )
+    except Exception:
+        pass
+
     svg_template = """
     <svg width="{{ width }}" height="{{ height }}" viewBox="0 0 {{ width }} {{ height }}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <defs>
             <linearGradient id="shade" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#000000" stop-opacity="0.35" />
-                <stop offset="50%" stop-color="#000000" stop-opacity="0.20" />
-                <stop offset="100%" stop-color="#000000" stop-opacity="0.08" />
+                <stop offset="0%" stop-color="#000000" stop-opacity="{{ shade_main_opacity }}" />
+                <stop offset="50%" stop-color="#000000" stop-opacity="{{ shade_mid_opacity }}" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="{{ shade_end_opacity }}" />
             </linearGradient>
             <linearGradient id="shadeLeft" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#000000" stop-opacity="0.55" />
+                <stop offset="0%" stop-color="#000000" stop-opacity="{{ side_shade_opacity }}" />
                 <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
             </linearGradient>
             <linearGradient id="shadeRight" x1="100%" y1="0%" x2="0%" y2="0%">
-                <stop offset="0%" stop-color="#000000" stop-opacity="0.55" />
+                <stop offset="0%" stop-color="#000000" stop-opacity="{{ side_shade_opacity }}" />
                 <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
             </linearGradient>
             <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -883,7 +1062,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             </text>
 
             <!-- CTA Button -->
-            <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="10" fill="{{ cta_color }}" filter="url(#shadow)" stroke="#ffffff" stroke-opacity="0.12"/>
+            <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="{{ cta_radius }}" fill="{{ cta_fill }}" filter="url(#shadow)" stroke="{{ cta_stroke }}" stroke-opacity="{{ cta_stroke_opacity }}"/>
             <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta }}</text>
         </g>
     </svg>
@@ -931,6 +1110,16 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         cta_color=cta_color,
         text_panel_w=text_panel_w,
         original_url=img_href,
+        # scrim/gradient vars
+        shade_main_opacity=shade_main_opacity,
+        shade_mid_opacity=shade_mid_opacity,
+        shade_end_opacity=shade_end_opacity,
+        side_shade_opacity=side_shade_opacity,
+        # CTA style vars
+        cta_radius=cta_radius,
+        cta_fill=cta_fill,
+        cta_stroke=cta_stroke,
+        cta_stroke_opacity=cta_stroke_opacity,
         int=int,
     )
     return svg_content
@@ -1208,6 +1397,16 @@ async def compose(payload: Dict[str, Any]):
             panel_side = None
         raw_tco = payload.get("text_color_override")
         tco = _normalize_hex_color(raw_tco) if isinstance(raw_tco, str) else None
+        # Optional variant controls
+        variant = payload.get("variant") or {}
+        if not isinstance(variant, dict):
+            variant = {}
+        vseed = payload.get("variant_seed")
+        if vseed is not None and "seed" not in variant:
+            try:
+                variant["seed"] = int(vseed)
+            except Exception:
+                pass
         svg_content = create_svg_composition(
             copy_data,
             analysis,
@@ -1215,6 +1414,7 @@ async def compose(payload: Dict[str, Any]):
             smart_layout=smart_layout,
             panel_side_override=panel_side,
             text_color_override=tco,
+            variant=variant,
         )
         
         # Generate composition ID
@@ -1234,6 +1434,71 @@ async def compose(payload: Dict[str, Any]):
         
     except Exception as e:
         logger.error(f"Error in composition: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/compose_variants")
+async def compose_variants(payload: Dict[str, Any]):
+    """Generate multiple diverse compositions in one call.
+    Payload: { copy, analysis, crop_info, count?, variant?, variant_seed? }
+    Returns: { compositions: [ {composition_id, svg, variant_used} ] }
+    """
+    try:
+        copy_data = payload.get("copy", {})
+        analysis = payload.get("analysis", {})
+        crop_info = payload.get("crop_info", {}) or {"width": 1080, "height": 1080}
+        count = max(1, int(payload.get("count", 3)))
+        base_variant = payload.get("variant") or {}
+        if not isinstance(base_variant, dict):
+            base_variant = {}
+        base_seed = payload.get("variant_seed")
+
+        # Deterministic base from copy
+        try:
+            basis = f"{copy_data.get('headline','')}|{copy_data.get('subheadline','')}|{copy_data.get('cta','')}"
+            copy_seed = int(hashlib.sha256(basis.encode('utf-8')).hexdigest(), 16) % (2**32)
+        except Exception:
+            copy_seed = random.randint(0, 2**31 - 1)
+
+        compositions = []
+        styles = ["fill", "outline", "pill"]
+        width_modes = ["auto", "wide"]
+        for i in range(count):
+            v = dict(base_variant)
+            # Seed strategy: user-provided or deterministic from copy + index
+            if "seed" not in v:
+                try:
+                    if base_seed is not None:
+                        v["seed"] = int(base_seed) + i
+                    else:
+                        v["seed"] = int(copy_seed) + i * 101
+                except Exception:
+                    v["seed"] = random.randint(0, 2**31 - 1)
+            # Ensure some toggles vary across variants
+            v.setdefault("cta_style", styles[i % len(styles)])
+            v.setdefault("cta_width_mode", width_modes[i % len(width_modes)])
+            # Alternate panel flip occasionally if not explicitly forced
+            if "panel_side" not in v:
+                v.setdefault("flip_panel", bool(i % 2))
+
+            svg = create_svg_composition(
+                copy_data,
+                analysis,
+                crop_info,
+                smart_layout=bool(payload.get("smart_layout", True)),
+                panel_side_override=(payload.get("panel_side") or None),
+                text_color_override=_normalize_hex_color(payload.get("text_color_override")) if isinstance(payload.get("text_color_override"), str) else None,
+                variant=v,
+            )
+            composition_id = f"comp_{hash(svg) % 1000000}_{i}"
+            compositions.append({
+                "composition_id": composition_id,
+                "svg": svg,
+                "variant_used": v,
+            })
+
+        return {"compositions": compositions, "count": len(compositions)}
+    except Exception as e:
+        logger.error(f"Error in compose_variants: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/render")

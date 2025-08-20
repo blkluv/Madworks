@@ -42,7 +42,7 @@ function HomeContentInner() {
         // Full-bleed chat dashboard
         <ChatView />
       ) : (
-        <div className="container mx-auto px-4 pt-8 pb-8">
+        <div className="w-full max-w-none px-4 md:px-8 pt-8 pb-8">
           {currentView === "home" && <HomeView />}
           {currentView === "projects" && <ProjectsView />}
           {currentView === "gallery" && <PremiumTemplatesView />}

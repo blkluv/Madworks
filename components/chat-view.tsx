@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useSession } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -92,7 +93,7 @@ function normalizeUrl(u: string): string {
     if (v.startsWith("http://") || v.startsWith("https://")) return v
 
     // Otherwise prefix with pipeline base
-    const base = (process.env.NEXT_PUBLIC_PIPELINE_BASE || "http://localhost:8010").replace(/\/$/, "")
+    const base = (process.env.NEXT_PUBLIC_PIPELINE_BASE || process.env.NEXT_PUBLIC_PIPELINE_URL || "http://localhost:8010").replace(/\/$/, "")
     const path = v.startsWith("/") ? v : `/${v}`
     return `${base}${path}`
   } catch {
@@ -129,9 +130,19 @@ export function ChatView() {
     subheadline: string
     cta: string
   } | null>(null)
-  const [lastOutputs, setLastOutputs] = useState<Array<{ format: string; width: number; height: number; url: string; variant?: string }>>([])
   const [copyList, setCopyList] = useState<Array<{ headline: string; subheadline: string; cta: string }>>([])
   const [showOptions, setShowOptions] = useState(false)
+  const { data: session } = useSession()
+
+  // Shuffle helper for suggestions
+  function shuffle<T>(arr: T[]): T[] {
+    const a = [...arr]
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[a[i], a[j]] = [a[j], a[i]]
+    }
+    return a
+  }
 
   const suggestions: Array<{ label: string; text: string; preset?: { platform?: string; tone?: string; aspect?: string; variants?: number } }> = [
     {
@@ -156,7 +167,24 @@ export function ChatView() {
       label: "Font pairing ideas",
       text: "Suggest a couple of safe headline/body pairings from the approved set.",
     },
+    {
+      label: "Bold contrast",
+      text: "High contrast type, large CTA. Emphasize readability over flourish.",
+      preset: { platform: "instagram", tone: "bold", aspect: "1:1", variants: 3 },
+    },
+    {
+      label: "Minimalist",
+      text: "Sparse copy, plenty of negative space, one strong accent color.",
+      preset: { tone: "minimal", aspect: "4:5", variants: 3 },
+    },
   ]
+
+  // Randomize which four suggestions show
+  const [suggestions4, setSuggestions4] = useState(suggestions.slice(0, 4))
+  useEffect(() => {
+    setSuggestions4(shuffle(suggestions).slice(0, 4))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const dimensionOptions = [
     { value: "1:1", label: "Square (1:1)", desc: "Instagram Feed, Carousels" },
@@ -320,29 +348,25 @@ export function ChatView() {
           `Headline: ${json.copy_best.headline}\n${json.copy_best.subheadline}\nCTA: ${json.copy_best.cta}`,
         )
       } else if (json.copy_variants?.length) {
-        textParts.push(`Generated ${json.copy_variants.length} copy variants.`)
+        const v0 = json.copy_variants[0]
+        textParts.push(
+          v0 ? `Headline: ${v0.headline}\n${v0.subheadline}\nCTA: ${v0.cta}` : `Generated ${json.copy_variants.length} copy variants.`
+        )
       }
-      // capture best copy for front-and-center recommendations panel
-      const best = json.copy_best || (json.copy_variants && json.copy_variants[0]) || null
-      setRecommendation(best ? { headline: best.headline, subheadline: best.subheadline, cta: best.cta } : null)
 
-      const attachments: Array<{ type: "image"; url: string }> = []
-      if (json.thumbnail_url) attachments.push({ type: "image", url: normalizeUrl(json.thumbnail_url) })
-      for (const o of json.outputs || []) {
-        const fmt = o.format.toLowerCase()
-        if (["png", "jpg", "jpeg", "webp", "svg"].includes(fmt)) attachments.push({ type: "image", url: normalizeUrl(o.url) })
-      }
-      // Keep a normalized, deduped list for the collage
-      setLastOutputs(dedupePreferredImages(json.outputs || []))
+      const bestForList = json.copy_best || (json.copy_variants && json.copy_variants[0]) || null
       setCopyList((json.copy_variants && json.copy_variants.length ? json.copy_variants : (json.copy_best ? [json.copy_best] : [])).map((c: any) => ({ headline: c.headline, subheadline: c.subheadline, cta: c.cta })))
+
+      // Build deduped image attachments per message to preserve history
+      const deduped = dedupePreferredImages(json.outputs || [])
+      const attachments: Array<{ type: "image"; url: string }> = deduped.map((o) => ({ type: "image", url: o.url }))
 
       const assistantMsg: Message = {
         id: `m_${Date.now() + 1}`,
         role: "assistant",
-        content: "",
+        content: textParts.join("\n\n"),
         timestamp: new Date().toISOString(),
-        // We show a single collage from lastOutputs; avoid duplicating as attachments
-        attachments: undefined,
+        attachments,
       }
 
       updateActive((c) => ({
@@ -377,6 +401,41 @@ export function ChatView() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [activeConv.messages.length])
 
+  // Persist active conversation when it changes (requires Google session)
+  useEffect(() => {
+    const persist = async () => {
+      try {
+        if (!session) return
+        const current = conversations.find((c) => c.id === activeId)
+        if (!current) return
+        await fetch(`/api/conversations/${current.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(current),
+        })
+      } catch {}
+    }
+    persist()
+  }, [conversations, activeId, session])
+
+  // Load conversations for this user on mount/login
+  useEffect(() => {
+    const load = async () => {
+      try {
+        if (!session) return
+        const res = await fetch('/api/conversations', { cache: 'no-store' })
+        if (!res.ok) return
+        const data = await res.json()
+        const list: Conversation[] = data?.conversations || []
+        if (list.length > 0) {
+          setConversations(list)
+          setActiveId(list[0].id)
+        }
+      } catch {}
+    }
+    load()
+  }, [session])
+
   // Auto-ingest pending data handed off from Home and send once
   const handleSendWithPending = useCallback(async () => {
     if (autoRanRef.current) return
@@ -408,7 +467,7 @@ export function ChatView() {
   return (
     <div className="h-full min-h-0 w-full bg-transparent overflow-hidden flex pt-4 md:pt-6">
       {/* Left: Conversations */}
-      <aside className="hidden md:flex w-[400px] lg:w-[480px] flex-col">
+      <aside className="hidden md:flex w-[220px] lg:w-[260px] flex-col">
         <div className="p-3">
           <div className="relative group isolate">
             <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
@@ -444,16 +503,17 @@ export function ChatView() {
       </aside>
 
       {/* Vertical separator */}
-      <div aria-hidden="true" className="hidden md:block w-px self-stretch bg-gradient-to-b from-transparent via-zinc-800 to-transparent" />
+      <div aria-hidden="true" className="hidden" />
 
       {/* Right: Chat */}
       <section className="flex-1 min-h-0 flex flex-col">
         {/* Messages & Collage */}
-        <div className="flex-1 min-h-0 overflow-y-auto chat-scrollbar p-8 space-y-8 w-full">
-          {activeConv.messages.length === 0 && (
-            <div className="w-full max-w-3xl">
-              <div className="mt-2 grid sm:grid-cols-2 gap-4">
-                {suggestions.slice(0, 4).map((s, i) => (
+        <div className="flex-1 min-h-0 overflow-y-auto chat-scrollbar w-full">
+          <div className="mx-auto max-w-3xl px-4 md:px-6 lg:px-8 py-8 pb-36 space-y-8">
+            {activeConv.messages.length === 0 && (
+              <div className="w-full">
+                <div className="mt-2 grid grid-cols-2 gap-3 max-w-xl mx-auto">
+                {suggestions4.map((s, i) => (
                   <div key={i} className="relative group isolate">
                     <div className="pointer-events-none absolute -inset-[2px] rounded-xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
                     <button
@@ -481,7 +541,7 @@ export function ChatView() {
           {activeConv.messages.map((m) => (
             m.role === 'user' ? (
               <div key={m.id} className="flex justify-end">
-                <div className="relative group isolate max-w-[85%]">
+                <div className="relative group isolate max-w-full">
                   <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
                   <div className="relative z-10 rounded-2xl px-5 py-3.5 border bg-zinc-900/50 border-zinc-900/60">
                     <div className="whitespace-pre-wrap text-zinc-200 text-[15px]">{m.content}</div>
@@ -500,28 +560,19 @@ export function ChatView() {
               </div>
             ) : (
               <div key={m.id} className="flex justify-start">
-                <div className="relative group isolate max-w-[85%]">
+                <div className="relative group isolate max-w-full">
                   <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 group-hover:opacity-10 blur-sm transition-opacity z-0"></div>
                   <div className="relative z-10 rounded-2xl px-5 py-3.5 border bg-zinc-900/40 border-zinc-900/60">
                     {m.content && (
                       <div className="whitespace-pre-wrap text-zinc-200 text-[15px] mb-2">{m.content}</div>
                     )}
-                    {/* Recommended copy (if available) */}
-                    {recommendation && m.id === lastAssistantId && (
-                      <div className="mb-3">
-                        <div className="text-sm text-zinc-200">{recommendation.headline}</div>
-                        <div className="text-sm text-zinc-400">{recommendation.subheadline}</div>
-                        <div className="text-xs text-zinc-500 mt-1">CTA: {recommendation.cta}</div>
-                      </div>
-                    )}
-                    {/* Inline collage anchored to the latest assistant message */}
-                    {lastOutputs.length > 0 && m.id === lastAssistantId && (
+                    {m.attachments && m.attachments.length > 0 && (
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {lastOutputs.map((o, i) => (
-                          <a key={i} href={o.url} target="_blank" rel="noreferrer" className="relative block group isolate">
+                        {m.attachments.map((a, i) => (
+                          <a key={i} href={(a as any).url} target="_blank" rel="noreferrer" className="relative block group isolate">
                             <span className="pointer-events-none absolute -inset-[2px] rounded-md bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></span>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={o.url} alt={`${o.format} ${o.width}x${o.height}`} className="relative z-10 rounded-md border border-zinc-900/60 bg-zinc-900/40 aspect-square object-contain group-hover:border-zinc-800" />
+                            <img src={(a as any).url} alt={`output ${i+1}`} className="relative z-10 rounded-md border border-zinc-900/60 bg-zinc-900/40 aspect-square object-contain group-hover:border-zinc-800" />
                           </a>
                         ))}
                       </div>
@@ -533,28 +584,29 @@ export function ChatView() {
           ))}
 
           {/* Inline typing/loading indicator where the assistant response will appear */}
-          {busy && (
-            <div className="flex justify-start">
-              <div className="relative group isolate max-w-[85%]">
-                <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 blur-sm transition-opacity z-0"></div>
-                <div className="relative z-10 rounded-2xl px-5 py-4 border bg-zinc-900/40 border-zinc-900/60">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+            {busy && (
+              <div className="flex justify-start">
+                <div className="relative group isolate max-w-full">
+                  <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 blur-sm transition-opacity z-0"></div>
+                  <div className="relative z-10 rounded-2xl px-5 py-4 border bg-zinc-900/40 border-zinc-900/60">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                      <div className="w-2 h-2 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                      <div className="w-2 h-2 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Anchor for auto-scroll at the end of messages */}
-          <div ref={messagesEndRef} />
+            {/* Anchor for auto-scroll at the end of messages */}
+            <div ref={messagesEndRef} />
+          </div>
         </div>
 
         {/* Composer */}
-        <div className="p-4 bg-transparent shrink-0" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
-          <div className="w-full">
+        <div className="sticky bottom-0 z-10 p-4 bg-transparent shrink-0" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+          <div className="w-full max-w-3xl mx-auto">
             <div className="mb-2 flex justify-end">
               <CreditsPill variant="inline" />
             </div>

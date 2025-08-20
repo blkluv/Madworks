@@ -33,7 +33,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
   const selectedView: ViewType = (currentView ?? ((searchParams.get("view") as ViewType) || "home"))
   return (
     <div className="sticky top-0 z-50">
-      <div className="container mx-auto px-4 py-4">
+      <div className="w-full px-4 py-4">
         <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4">
           <div
             role="button"

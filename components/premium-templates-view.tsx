@@ -146,7 +146,7 @@ export function PremiumTemplatesView() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="w-full max-w-none px-4 md:px-8 space-y-8">
       {/* Header */}
       <div className="text-center">
         <div className="flex items-center justify-center gap-3 mb-4">
@@ -253,7 +253,7 @@ export function PremiumTemplatesView() {
             Premium
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
           {mockDeveloperTemplates.map((template) => (
             <Card
               key={template.id}
@@ -351,7 +351,7 @@ export function PremiumTemplatesView() {
             AI Powered
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
           {mockAITemplates.map((template) => (
             <Card
               key={template.id}
