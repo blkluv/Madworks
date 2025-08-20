@@ -80,7 +80,7 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
       !isGrouped && (isUser ? 'bg-zinc-900/50' : 'bg-zinc-800/50')
     )}>
       {!isUser && !isGrouped && (
-        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center">
+        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
           <Bot className="w-4 h-4 text-white" />
         </div>
       )}
@@ -103,8 +103,8 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
         <div className={cn(
           "rounded-xl p-3 text-sm",
           isUser 
-            ? 'bg-indigo-600/20 border border-indigo-500/30' 
-            : 'bg-zinc-700/50 border border-zinc-700/50'
+            ? 'bg-black/50 border border-zinc-700/60' 
+            : 'bg-zinc-700/40 border border-zinc-700/50'
         )}>
           {content && (
             <div className="prose prose-invert prose-sm max-w-none">

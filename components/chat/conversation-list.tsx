@@ -101,7 +101,7 @@ export function ConversationList({
             
             <Button
               onClick={onNewChat}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="w-full bg-black hover:bg-zinc-900 text-white border border-zinc-700"
             >
               <PlusCircle className="w-4 h-4 mr-2" />
               New Chat
@@ -173,7 +173,7 @@ export function ConversationList({
                   <Button
                     onClick={onNewChat}
                     variant="link"
-                    className="text-indigo-400 hover:text-indigo-300 mt-2"
+                    className="text-zinc-300 hover:text-zinc-100 mt-2"
                   >
                     Start a new chat
                   </Button>

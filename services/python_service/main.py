@@ -9,7 +9,7 @@ from pathlib import Path
 import uuid
 
 import openai
-import cairosvg
+# cairosvg is lazily imported in the render path to avoid startup failures
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import cv2
@@ -1019,34 +1019,41 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
             logger.warning(f"CairoSVG url_fetcher failed for {url}: {e}")
             return {"string": b"", "mime_type": "application/octet-stream"}
 
-    png_bytes = cairosvg.svg2png(
-        bytestring=svg_content.encode('utf-8'),
-        output_width=width,
-        output_height=height,
-        unsafe=True,
-    )
-    logger.info(f"Rendered PNG bytes: {len(png_bytes)}")
+    # Try to render PNG/JPG using CairoSVG if available. If not, gracefully return SVG-only outputs.
+    png_bytes = None
+    try:
+        import cairosvg  # type: ignore
+        png_bytes = cairosvg.svg2png(
+            bytestring=svg_content.encode('utf-8'),
+            output_width=width,
+            output_height=height,
+            unsafe=True,
+        )
+        logger.info(f"Rendered PNG bytes: {len(png_bytes)}")
+    except Exception as e:
+        logger.warning(f"Skipping PNG/JPG rendering due to missing CairoSVG or native deps: {e}")
 
-    # Upload PNG
-    png_key = f"outputs/{job_id}_{unique}_png.png"
-    png_url, _ = _upload_bytes(outputs_bucket, png_key, png_bytes, 'image/png')
-    outputs.append(RenderOutput(format="png", width=width, height=height, url=png_url))
+    if png_bytes:
+        # Upload PNG
+        png_key = f"outputs/{job_id}_{unique}_png.png"
+        png_url, _ = _upload_bytes(outputs_bucket, png_key, png_bytes, 'image/png')
+        outputs.append(RenderOutput(format="png", width=width, height=height, url=png_url))
 
-    # 3) Convert PNG -> JPG via Pillow and upload (flatten any transparency onto white to avoid dark backgrounds)
-    with Image.open(io.BytesIO(png_bytes)) as im:
-        if im.mode in ('RGBA', 'LA') or (im.mode == 'P' and 'transparency' in im.info):
-            background = Image.new('RGB', im.size, (255, 255, 255))
-            alpha = im.split()[-1] if im.mode != 'P' else Image.new('L', im.size, 255)
-            background.paste(im, mask=alpha)
-            rgb_im = background
-        else:
-            rgb_im = im.convert('RGB')
-        jpg_buffer = io.BytesIO()
-        rgb_im.save(jpg_buffer, format='JPEG', quality=90)
-        jpg_buffer.seek(0)
-    jpg_key = f"outputs/{job_id}_{unique}_jpg.jpg"
-    jpg_url, _ = _upload_bytes(outputs_bucket, jpg_key, jpg_buffer.getvalue(), 'image/jpeg')
-    outputs.append(RenderOutput(format="jpg", width=width, height=height, url=jpg_url))
+        # 3) Convert PNG -> JPG via Pillow and upload (flatten any transparency onto white to avoid dark backgrounds)
+        with Image.open(io.BytesIO(png_bytes)) as im:
+            if im.mode in ('RGBA', 'LA') or (im.mode == 'P' and 'transparency' in im.info):
+                background = Image.new('RGB', im.size, (255, 255, 255))
+                alpha = im.split()[-1] if im.mode != 'P' else Image.new('L', im.size, 255)
+                background.paste(im, mask=alpha)
+                rgb_im = background
+            else:
+                rgb_im = im.convert('RGB')
+            jpg_buffer = io.BytesIO()
+            rgb_im.save(jpg_buffer, format='JPEG', quality=90)
+            jpg_buffer.seek(0)
+        jpg_key = f"outputs/{job_id}_{unique}_jpg.jpg"
+        jpg_url, _ = _upload_bytes(outputs_bucket, jpg_key, jpg_buffer.getvalue(), 'image/jpeg')
+        outputs.append(RenderOutput(format="jpg", width=width, height=height, url=jpg_url))
 
     return outputs
 

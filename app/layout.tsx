@@ -5,6 +5,7 @@ import './globals.css'
 import { AppProvider } from '@/components/app-context'
 import { AuthProvider } from '@/components/auth-provider'
 import { SiteHeader } from '@/components/site-header'
+import { Suspense } from 'react'
 
 export const metadata: Metadata = {
   title: 'v0 App',
@@ -46,7 +47,9 @@ html {
                 <div className="absolute inset-0 bg-gradient-to-tl from-transparent via-pink-500/2 to-transparent"></div>
               </div>
 
-              <SiteHeader />
+              <Suspense fallback={null}>
+                <SiteHeader />
+              </Suspense>
               <main className="flex-1 min-h-0">
                 {children}
               </main>

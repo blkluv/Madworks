@@ -193,7 +193,7 @@ export function Composer({
               className={cn(
                 "w-8 h-8 rounded-full transition-all",
                 (value.trim() || attachments.length > 0) && !isSubmitting
-                  ? "bg-indigo-600 hover:bg-indigo-700 text-white"
+                  ? "bg-black hover:bg-zinc-900 text-white border border-zinc-700"
                   : "bg-zinc-700 text-zinc-500"
               )}
               title="Send message"

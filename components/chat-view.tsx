@@ -412,7 +412,7 @@ export function ChatView() {
         <div className="p-3">
           <div className="relative group isolate">
             <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
-            <Button onClick={startNewChat} className="relative z-10 w-full h-16 rounded-2xl border border-zinc-800 bg-black/60 hover:bg-black/70 text-lg transition-all shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40">
+            <Button onClick={startNewChat} className="relative z-10 w-full h-16 rounded-2xl border border-zinc-800 bg-black/60 hover:bg-black/70 text-lg transition-all shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/40">
               <PlusCircle className="w-5 h-5 mr-2" /> New chat
             </Button>
           </div>
@@ -424,15 +424,15 @@ export function ChatView() {
                 <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 group-hover:opacity-10 blur-sm transition-opacity z-0"></div>
                 <button
                   onClick={() => setActiveId(c.id)}
-                  className={`relative z-10 w-full text-left px-4 py-2.5 text-sm rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/30 ${
+                  className={`relative z-10 w-full text-left px-4 py-2.5 text-sm rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/30 ${
                     activeId === c.id 
-                      ? 'border-indigo-500/40 bg-zinc-900 hover:bg-zinc-900' 
+                      ? 'border-zinc-700/60 bg-zinc-900 hover:bg-zinc-900' 
                       : 'border-zinc-800 bg-black/40 hover:bg-black/50'
                   }`}
                   aria-current={activeId === c.id ? 'true' : undefined}
                 >
                   {activeId === c.id && (
-                    <span className="pointer-events-none absolute left-2 top-2 bottom-2 w-1 rounded-full bg-gradient-to-b from-indigo-500 via-pink-500 to-amber-500 opacity-70" />
+                    <span className="pointer-events-none absolute left-2 top-2 bottom-2 w-1 rounded-full bg-gradient-to-b from-zinc-400 via-zinc-500 to-zinc-600 opacity-70" />
                   )}
                   <div className="truncate text-sm font-medium text-zinc-200 pl-1">{c.title || "Untitled"}</div>
                   <div className="text-xs text-zinc-500 pl-1">{c.messages.length} messages</div>
@@ -539,9 +539,9 @@ export function ChatView() {
                 <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 blur-sm transition-opacity z-0"></div>
                 <div className="relative z-10 rounded-2xl px-5 py-4 border bg-zinc-900/40 border-zinc-900/60">
                   <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 rounded-full bg-indigo-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-zinc-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
                   </div>
                 </div>
               </div>
@@ -721,7 +721,7 @@ export function ChatView() {
                       {busy ? (
                         <div className="relative z-10 w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       ) : (
-                        <div className="relative z-10 w-12 h-12 rounded-full bg-indigo-600 hover:bg-indigo-700 flex items-center justify-center">
+                        <div className="relative z-10 w-12 h-12 rounded-full bg-black/70 hover:bg-black border border-zinc-700 flex items-center justify-center">
                           <Send className="w-5 h-5" />
                         </div>
                       )}
