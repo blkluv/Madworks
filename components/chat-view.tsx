@@ -335,7 +335,8 @@ export function ChatView() {
       try { form.append("sizes", JSON.stringify(sizesForAspect(selectedAspectRatio))) } catch {}
       if (textColorOverride && textColorOverride.trim()) form.append("text_color_override", textColorOverride.trim())
 
-      const res = await fetch("/api/pipeline/run", { method: "POST", body: form })
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+      const res = await fetch(`${apiUrl}/api/pipeline`, { method: "POST", body: form })
       if (!res.ok) {
         const t = await res.text().catch(() => "")
         throw new Error(`HTTP ${res.status}: ${t}`)
@@ -408,7 +409,8 @@ export function ChatView() {
         if (!session) return
         const current = conversations.find((c) => c.id === activeId)
         if (!current) return
-        await fetch(`/api/conversations/${current.id}`, {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
+        await fetch(`${apiUrl}/api/conversations/${current.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(current),
