@@ -6,6 +6,7 @@ import { AppProvider } from '@/components/app-context'
 import { AuthProvider } from '@/components/auth-provider'
 import { SiteHeader } from '@/components/site-header'
 import { Suspense } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 
 export const metadata: Metadata = {
   title: 'v0 App',
@@ -53,6 +54,7 @@ html {
               <main className="flex-1 min-h-0">
                 {children}
               </main>
+              <Analytics />
             </div>
           </AppProvider>
         </AuthProvider>
