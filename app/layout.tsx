@@ -9,9 +9,15 @@ import { Suspense } from 'react'
 import { Analytics } from '@vercel/analytics/react'
 
 export const metadata: Metadata = {
-  title: 'v0 App',
+  title: 'Madworks AI',
   description: 'Created with v0',
   generator: 'v0.app',
+  icons: {
+    icon: '/mwlg2.png',
+    shortcut: '/mwlg2.png',
+    apple: '/mwlg2.png',
+  },
+  manifest: '/site.webmanifest',
 }
 
 export default function RootLayout({
