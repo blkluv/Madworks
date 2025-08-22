@@ -37,13 +37,18 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
           href={img.url} 
           target="_blank" 
           rel="noopener noreferrer"
-          className="block mt-2 rounded-lg overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors"
+          className="block mt-2 rounded-lg overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors relative"
         >
           <img 
             src={img.url} 
             alt="Attachment"
             className="w-full max-h-[500px] object-contain bg-black/30"
           />
+          {img.variant && (
+            <span className="absolute top-2 left-2 bg-black/70 text-xs px-2 py-0.5 rounded-md border border-white/10">
+              {img.variant}
+            </span>
+          )}
         </a>
       )
     }
@@ -60,13 +65,18 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
             href={img.url} 
             target="_blank" 
             rel="noopener noreferrer"
-            className="block rounded-md overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors aspect-square"
+            className="block rounded-md overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors aspect-square relative"
           >
             <img 
               src={img.url} 
               alt={`Attachment ${i + 1}`}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain bg-black/30"
             />
+            {img.variant && (
+              <span className="absolute top-1.5 left-1.5 bg-black/70 text-[10px] px-1.5 py-[2px] rounded border border-white/10">
+                {img.variant}
+              </span>
+            )}
           </a>
         ))}
       </div>

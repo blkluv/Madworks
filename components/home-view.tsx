@@ -10,9 +10,6 @@ export function HomeView() {
     <div className="max-w-6xl mx-auto space-y-12">
       {/* Hero Section (no big box) */}
       <div className="text-center space-y-6">
-        <div className="inline-flex items-center justify-center p-4 rounded-3xl bg-zinc-900/50 border border-zinc-800 backdrop-blur">
-          <Sparkles className="h-10 w-10 text-zinc-300" />
-        </div>
         <h1 className="text-4xl font-bold text-white tracking-tight">
           <span className="chromatic-text">Transform</span> Your Ads with AI
         </h1>

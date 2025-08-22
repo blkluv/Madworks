@@ -17,18 +17,27 @@ interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: string
-  attachments?: Array<{ type: string; url: string }>
+  attachments?: Array<{ type: string; url: string; variant?: string; label?: string; size?: string }>
+}
+
+// Robust unique ID generator to avoid React key collisions when sending quickly
+const uid = () => {
+  try {
+    // @ts-ignore
+    if (typeof crypto !== 'undefined' && crypto?.randomUUID) return crypto.randomUUID()
+  } catch {}
+  return `id_${Date.now()}_${Math.random().toString(36).slice(2)}`
 }
 
 // Prefer a single best format per size/variant to avoid duplicates in the collage
 function dedupePreferredImages(
-  outs: Array<{ format: string; width: number; height: number; url: string; variant?: string }> = []
+  outs: Array<{ format: string; width: number; height: number; url: string; variant?: string; label?: string; size?: string }> = []
 ) {
+  // Prefer raster formats when available, but allow SVG as a fallback so users still see outputs
   const rank: Record<string, number> = { png: 4, jpg: 3, jpeg: 3, webp: 2, svg: 1 }
   const bestByKey = new Map<string, { format: string; width: number; height: number; url: string; variant?: string }>()
   for (const o of outs) {
     const fmt = (o.format || "").toLowerCase()
-    if (!["png", "jpg", "jpeg", "webp"].includes(fmt)) continue
     const key = `${o.width}x${o.height}_${o.variant || ""}`
     const existing = bestByKey.get(key)
     if (!existing || (rank[fmt] || 0) > (rank[(existing.format || "").toLowerCase()] || 0)) {
@@ -79,6 +88,8 @@ type PipelineResponse = {
   }>
   error?: string
   analysis?: any
+  composition?: any
+  logs?: Array<{ step: string; status: string; message?: string; error?: string }>
 }
 
 function normalizeUrl(u: string): string {
@@ -232,7 +243,7 @@ export function ChatView() {
   const lastAssistantId = [...activeConv.messages].filter((m) => m.role === 'assistant').slice(-1)[0]?.id
 
   const startNewChat = () => {
-    const id = `c_${Date.now()}`
+    const id = `c_${uid()}`
     const now = new Date().toISOString()
     setConversations((prev) => [
       { 
@@ -264,7 +275,7 @@ export function ChatView() {
           ...c,
           messages: [
             ...c.messages,
-            { id: `m_${Date.now()}`, role: 'assistant', content: "Please enter a prompt (and attach an image) to start a new ad.", timestamp: new Date().toISOString() },
+            { id: uid(), role: 'assistant', content: "Please enter a prompt (and attach an image) to start a new ad.", timestamp: new Date().toISOString() },
           ],
         }))
         return
@@ -277,7 +288,7 @@ export function ChatView() {
           ...c,
           messages: [
             ...c.messages,
-            { id: `m_${Date.now()}`, role: 'assistant', content: msg, timestamp: new Date().toISOString() },
+            { id: uid(), role: 'assistant', content: msg, timestamp: new Date().toISOString() },
           ],
         }))
         try { fileInputRef.current?.click() } catch {}
@@ -292,7 +303,7 @@ export function ChatView() {
           ...c,
           messages: [
             ...c.messages,
-            { id: `m_${Date.now()}`, role: 'assistant', content: "You mentioned an image, but none is attached in this chat yet. Please attach one with the paperclip.", timestamp: new Date().toISOString() },
+            { id: uid(), role: 'assistant', content: "You mentioned an image, but none is attached in this chat yet. Please attach one with the paperclip.", timestamp: new Date().toISOString() },
           ],
         }))
         try { fileInputRef.current?.click() } catch {}
@@ -301,7 +312,7 @@ export function ChatView() {
     }
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: uid(),
       role: 'user',
       content: input,
       timestamp: new Date().toISOString(),
@@ -336,7 +347,7 @@ export function ChatView() {
       if (textColorOverride && textColorOverride.trim()) form.append("text_color_override", textColorOverride.trim())
 
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
-      const res = await fetch(`${apiUrl}/api/pipeline`, { method: "POST", body: form })
+      const res = await fetch(`${apiUrl}/api/pipeline/run`, { method: "POST", body: form })
       if (!res.ok) {
         const t = await res.text().catch(() => "")
         throw new Error(`HTTP ${res.status}: ${t}`)
@@ -355,15 +366,37 @@ export function ChatView() {
         )
       }
 
+      // If pipeline reported errors and we have no outputs, append brief notes to help the user
+      const hadNoOutputs = !(json.outputs && json.outputs.length > 0)
+      if (hadNoOutputs && Array.isArray(json.logs)) {
+        const errs = json.logs.filter((l: any) => l && l.status === 'error').slice(0, 2)
+        if (errs.length) {
+          const notes = errs.map((l: any) => `${l.step}: ${l.error || l.message || 'error'}`).join('\n')
+          textParts.push(`Notes:\n${notes}`)
+        }
+      }
+
       const bestForList = json.copy_best || (json.copy_variants && json.copy_variants[0]) || null
       setCopyList((json.copy_variants && json.copy_variants.length ? json.copy_variants : (json.copy_best ? [json.copy_best] : [])).map((c: any) => ({ headline: c.headline, subheadline: c.subheadline, cta: c.cta })))
 
       // Build deduped image attachments per message to preserve history
       const deduped = dedupePreferredImages(json.outputs || [])
-      const attachments: Array<{ type: "image"; url: string }> = deduped.map((o) => ({ type: "image", url: o.url }))
+      let attachments: Array<{ type: "image"; url: string; variant?: string }> = deduped.map((o: any) => ({
+        type: "image",
+        url: o.url,
+        variant: [o.variant, o.size].filter(Boolean).join(" ") || undefined,
+      }))
+      // Fallback: if no raster/SVG outputs were uploaded, embed the composed SVG directly if available
+      if (attachments.length === 0 && json?.composition?.svg) {
+        try {
+          const svg = json.composition.svg as string
+          const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+          attachments = [{ type: 'image', url: dataUrl }]
+        } catch {}
+      }
 
       const assistantMsg: Message = {
-        id: `m_${Date.now() + 1}`,
+        id: uid(),
         role: "assistant",
         content: textParts.join("\n\n"),
         timestamp: new Date().toISOString(),
@@ -386,7 +419,7 @@ export function ChatView() {
         ...c,
         messages: [
           ...c.messages,
-          { id: `m_${Date.now() + 2}`, role: "assistant", content: `Error: ${err?.message || String(err)}`, timestamp: new Date().toISOString() },
+          { id: uid(), role: "assistant", content: `Error: ${err?.message || String(err)}`, timestamp: new Date().toISOString() },
         ],
       }))
     } finally {

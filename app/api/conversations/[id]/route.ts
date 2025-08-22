@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { getConversation, upsertConversation, deleteConversation, type Conversation } from "../_store";
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -10,27 +11,7 @@ const CORS_HEADERS = {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: string;
-  attachments?: Array<{ type: string; url: string }>;
-}
-
-interface Conversation {
-  id: string;
-  title: string;
-  messages: Message[];
-  createdAt: string;
-  updatedAt: string;
-  analysis?: any;
-}
-
-// Reuse global in-memory store created in list route
-const store: Map<string, Conversation[]> = (globalThis as any).__conv_store__ || new Map<string, Conversation[]>();
-// @ts-ignore
-if (!(globalThis as any).__conv_store__) (globalThis as any).__conv_store__ = store;
+// Use file-based store shared with list route. For production, replace with durable DB.
 
 export async function OPTIONS() {
   return new NextResponse(null, { headers: CORS_HEADERS });
@@ -47,8 +28,7 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
     }
     const email = session.user.email as string;
     const { id } = await ctx.params;
-    const list = store.get(email) || [];
-    const conv = list.find((c) => c.id === id);
+    const conv = await getConversation(email, id);
     
     if (!conv) {
       return new NextResponse(
@@ -92,21 +72,10 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
       analysis: body?.analysis ?? undefined,
     };
 
-    const list = store.get(email) || [];
-    const index = list.findIndex((c) => c.id === id);
-    
-    if (index === -1) {
-      return new NextResponse(
-        JSON.stringify({ error: 'Not found' }), 
-        { status: 404, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
-      );
-    }
-
-    list[index] = incoming;
-    store.set(email, list);
+    const saved = await upsertConversation(email, incoming);
 
     return new NextResponse(
-      JSON.stringify({ conversation: incoming }), 
+      JSON.stringify({ conversation: saved }), 
       { status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
     );
   } catch (error) {
@@ -130,9 +99,7 @@ export async function DELETE(_: Request, ctx: { params: Promise<{ id: string }> 
     
     const email = session.user.email as string;
     const { id } = await ctx.params;
-    const list = store.get(email) || [];
-    const filtered = list.filter((c) => c.id !== id);
-    store.set(email, filtered);
+    await deleteConversation(email, id);
     
     return new NextResponse(null, { 
       status: 204, 

@@ -5,8 +5,9 @@ import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, H
 import { useState, useEffect, useRef } from "react"
 import { useSession } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
+import Image from "next/image"
 
-type ViewType = "home" | "projects" | "gallery" | "premium" | "chat"
+type ViewType = "home" | "studio" | "gallery" | "premium" | "chat"
 
 export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewType; onNavChange?: (v: ViewType) => void }) {
   const [showAccountDropdown, setShowAccountDropdown] = useState(false)
@@ -42,11 +43,14 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             aria-label="Go to Home"
             title="Madworks AI - Home"
           >
-            <div className="p-3 bg-gradient-to-br from-indigo-600 via-pink-600 to-orange-500 rounded-xl shadow-lg shadow-indigo-600/25 ring-0 group-hover:ring-2 group-hover:ring-white/40 transition">
-              <div className="w-6 h-6 flex items-center justify-center">
-                <span className="text-white font-bold text-xl">M</span>
-              </div>
-            </div>
+            <Image
+              src="/mwlogo1.png"
+              alt="Madworks logo"
+              width={40}
+              height={40}
+              className="rounded-xl"
+              priority
+            />
             <h1 className="text-2xl font-bold text-white">Madworks AI</h1>
           </div>
 
@@ -78,16 +82,16 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   <BookOpen className="w-4 h-4 mr-2" /> Create
                 </Button>
                 <Button
-                  data-nav="projects"
-                  onClick={() => goto("projects")}
+                  data-nav="studio"
+                  onClick={() => goto("studio")}
                   variant="outline"
                   size="lg"
-                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'projects' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'studio' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
-                  {selectedView === 'projects' && (
+                  {selectedView === 'studio' && (
                     <span className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0" />
                   )}
-                  <Folder className="w-4 h-4 mr-2" /> Projects
+                  <Folder className="w-4 h-4 mr-2" /> Studio
                 </Button>
                 <Button
                   data-nav="gallery"

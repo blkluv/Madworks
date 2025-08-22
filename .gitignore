@@ -53,6 +53,9 @@ Thumbs.db
 logs/
 *.log
 
+# local data
+.data/
+
 # local env overrides (explicit)
 .env.local
 .env.*.local

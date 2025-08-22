@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { loadConversations, upsertConversation, type Conversation } from "./_store";
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -10,26 +11,8 @@ const CORS_HEADERS = {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: string;
-  attachments?: Array<{ type: string; url: string }>;
-}
-
-interface Conversation {
-  id: string;
-  title: string;
-  messages: Message[];
-  createdAt: string;
-  updatedAt: string;
-  analysis?: any;
-}
-
-// Simple in-memory store keyed by user email. NOTE: ephemeral, not production-grade.
-const store: Map<string, Conversation[]> = (globalThis as any).__conv_store__ || new Map<string, Conversation[]>();
-if (!(globalThis as any).__conv_store__) (globalThis as any).__conv_store__ = store;
+// Conversations are persisted per Google account via a simple file-based store.
+// For production, use a durable DB (e.g., Postgres/SQLite/Firestore).
 
 export async function OPTIONS() {
   return new NextResponse(null, { headers: CORS_HEADERS });
@@ -45,7 +28,7 @@ export async function GET() {
       );
     }
     const email = session.user.email as string;
-    const conversations = store.get(email) || [];
+    const conversations = await loadConversations(email);
     return new NextResponse(
       JSON.stringify({ conversations }), 
       { status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
@@ -72,19 +55,18 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const now = new Date().toISOString();
     const conv: Conversation = {
-      id: body?.id || `c_${Date.now()}`,
-      title: body?.title || "New chat",
+      id: String(body?.id || `c_${Date.now()}_${Math.random().toString(36).slice(2)}`),
+      title: String(body?.title || "New chat"),
       messages: Array.isArray(body?.messages) ? body.messages : [],
-      createdAt: body?.createdAt || now,
+      createdAt: String(body?.createdAt || now),
       updatedAt: now,
+      analysis: body?.analysis ?? undefined,
     };
 
-    const conversations = store.get(email) || [];
-    conversations.push(conv);
-    store.set(email, conversations);
+    const saved = await upsertConversation(email, conv);
 
     return new NextResponse(
-      JSON.stringify({ conversation: conv }), 
+      JSON.stringify({ conversation: saved }), 
       { status: 201, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
     );
   } catch (error) {

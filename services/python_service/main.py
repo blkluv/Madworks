@@ -611,7 +611,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     panel_side = "left"
     try:
         override = (panel_side_override or "").strip().lower() if isinstance(panel_side_override, str) else None
-        if override in ("left", "right"):
+        if override in ("left", "right", "center"):
             panel_side = override
         elif smart_layout:
             bbox = analysis.get("foreground_bbox") or None
@@ -636,7 +636,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         if isinstance(v.get("flip_panel"), bool) and v.get("flip_panel") and not panel_side_override:
             panel_side = "left" if panel_side == "right" else "right"
         forced_side = v.get("panel_side")
-        if isinstance(forced_side, str) and forced_side.lower() in ("left", "right"):
+        if isinstance(forced_side, str) and forced_side.lower() in ("left", "right", "center"):
             panel_side = forced_side.lower()
     except Exception:
         pass
@@ -646,7 +646,12 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     if not isinstance(panel_width_factor, (int, float)):
         panel_width_factor = rng.uniform(0.56, 0.66)
     text_panel_w = int(width * float(panel_width_factor))
-    text_x = padding if panel_side == "left" else (width - text_panel_w + padding)
+    if panel_side == "left":
+        text_x = padding
+    elif panel_side == "right":
+        text_x = width - text_panel_w + padding
+    else:  # center
+        text_x = int((width - text_panel_w) / 2) + padding
 
     # CTA sizing; final placement computed after text layout is fitted
     cta_text = copy_data.get("cta", "Learn More")
@@ -1024,7 +1029,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
         <!-- Background -->
         {% if original_url %}
-        <image xlink:href="{{ original_url }}" x="0" y="0" width="{{ width }}" height="{{ height }}" preserveAspectRatio="xMidYMid slice"/>
+        <image xlink:href="{{ original_url }}" x="0" y="0" width="{{ width }}" height="{{ height }}" preserveAspectRatio="xMidYMid meet"/>
         <!-- Legibility gradient overlay -->
         <rect width="100%" height="100%" fill="url(#shade)" />
         {% else %}
@@ -1036,8 +1041,10 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             <!-- Stronger side scrim for text legibility -->
             {% if panel_side == 'left' %}
             <rect x="0" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shadeLeft)" />
-            {% else %}
+            {% elif panel_side == 'right' %}
             <rect x="{{ width - text_panel_w }}" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shadeRight)" />
+            {% else %}
+            <rect x="{{ center_x }}" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shade)" />
             {% endif %}
             <!-- Headline with emphasis tspans -->
             <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{{ text_color }}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)">
@@ -1078,6 +1085,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         )
     except Exception:
         pass
+    center_x = int((width - text_panel_w) / 2)
     svg_content = template.render(
         width=width,
         height=height,
@@ -1115,6 +1123,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         shade_mid_opacity=shade_mid_opacity,
         shade_end_opacity=shade_end_opacity,
         side_shade_opacity=side_shade_opacity,
+        center_x=center_x,
         # CTA style vars
         cta_radius=cta_radius,
         cta_fill=cta_fill,
@@ -1393,7 +1402,7 @@ async def compose(payload: Dict[str, Any]):
         smart_layout = bool(payload.get("smart_layout", True))
         panel_side_raw = payload.get("panel_side")
         panel_side = panel_side_raw.strip().lower() if isinstance(panel_side_raw, str) else None
-        if panel_side not in ("left", "right"):
+        if panel_side not in ("left", "right", "center"):
             panel_side = None
         raw_tco = payload.get("text_color_override")
         tco = _normalize_hex_color(raw_tco) if isinstance(raw_tco, str) else None
