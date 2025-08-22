@@ -1,0 +1,192 @@
+"use client"
+
+import { Card } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Heart, Download, Eye, TrendingUp, Crown, Zap, Code } from "lucide-react"
+import { useState } from "react"
+
+// Mock data remains the same...
+
+const PremiumTemplatesView = () => {
+  const [filters, setFilters] = useState({
+    category: "all",
+    templateType: "all",
+    sortBy: "popular",
+    tags: [] as string[],
+    searchQuery: ""
+  })
+
+  const categories = [
+    { value: "all", label: "All Categories" },
+    { value: "saas", label: "SaaS" },
+    { value: "ecommerce", label: "E-commerce" },
+    { value: "luxury", label: "Luxury" },
+    { value: "fashion", label: "Fashion" },
+    { value: "fitness", label: "Health & Fitness" },
+    { value: "sustainability", label: "Sustainability" },
+  ]
+
+  const sortOptions = [
+    { value: "popular", label: "Most Popular" },
+    { value: "newest", label: "Newest First" },
+    { value: "downloads", label: "Most Downloaded" },
+    { value: "rating", label: "Highest Rated" },
+  ]
+
+  const availableTags = [
+    { id: "featured", name: "Featured", color: "from-indigo-600 to-indigo-700" },
+    { id: "trending", name: "Trending", color: "from-pink-600 to-rose-500" },
+    { id: "new", name: "New", color: "from-emerald-500 to-teal-500" },
+    { id: "free", name: "Free", color: "from-amber-500 to-orange-500" },
+  ]
+
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString)
+    const now = new Date()
+    const diffTime = Math.abs(now.getTime() - date.getTime())
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+    if (diffDays === 1) return "1 day ago"
+    if (diffDays < 7) return `${diffDays} days ago`
+    if (diffDays < 30) return `${Math.ceil(diffDays / 7)} weeks ago`
+    return `${Math.ceil(diffDays / 30)} months ago`
+  }
+
+  return (
+    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      {/* Header */}
+      <div className="text-center">
+        <div className="flex items-center justify-center gap-3 mb-4">
+          <Crown className="w-8 h-8 text-yellow-400" />
+          <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-400 via-pink-400 to-orange-400 bg-clip-text text-transparent">
+            Premium Templates
+          </h1>
+        </div>
+        <p className="text-gray-300 text-lg max-w-2xl mx-auto">
+          Access exclusive developer-crafted templates and AI-generated designs for professional campaigns.
+        </p>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 max-w-7xl mx-auto mb-8">
+        {/* Stats cards remain the same... */}
+      </div>
+
+      {/* Filter Bar */}
+      <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg mb-8">
+        <div className="space-y-6">
+          {/* Search Bar */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search templates..."
+              value={filters.searchQuery}
+              onChange={(e) => setFilters({...filters, searchQuery: e.target.value})}
+              className="w-full px-4 py-3 bg-zinc-900/70 border border-zinc-800 text-zinc-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300 pl-12"
+            />
+            <svg
+              className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-zinc-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Template Type Filter */}
+              <div className="flex flex-col">
+                <span className="text-sm text-zinc-400 mb-1">Template Type</span>
+                <div className="flex items-center gap-2 bg-zinc-900/50 p-1 rounded-xl">
+                  {[
+                    { value: 'all', label: 'All' },
+                    { value: 'developer', label: 'Developer' },
+                    { value: 'ai', label: 'AI Generated' }
+                  ].map((type) => (
+                    <button
+                      key={type.value}
+                      onClick={() => setFilters({...filters, templateType: type.value as any})}
+                      className={`px-4 py-2 text-sm rounded-lg transition-colors ${
+                        filters.templateType === type.value 
+                          ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white' 
+                          : 'text-zinc-300 hover:bg-zinc-800/50'
+                      }`}
+                    >
+                      {type.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Category Filter */}
+              <div className="flex flex-col">
+                <span className="text-sm text-zinc-400 mb-1">Category</span>
+                <select
+                  value={filters.category}
+                  onChange={(e) => setFilters({...filters, category: e.target.value})}
+                  className="px-4 py-2 bg-zinc-900/70 border border-zinc-800 text-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300"
+                >
+                  {categories.map((category) => (
+                    <option key={category.value} value={category.value}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Sort By */}
+              <div className="flex flex-col">
+                <span className="text-sm text-zinc-400 mb-1">Sort By</span>
+                <select
+                  value={filters.sortBy}
+                  onChange={(e) => setFilters({...filters, sortBy: e.target.value as any})}
+                  className="px-4 py-2 bg-zinc-900/70 border border-zinc-800 text-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300"
+                >
+                  {sortOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Tags Filter */}
+          <div className="space-y-2">
+            <span className="text-sm text-zinc-400">Popular Tags</span>
+            <div className="flex flex-wrap gap-2">
+              {availableTags.map((tag) => (
+                <button
+                  key={tag.id}
+                  onClick={() => {
+                    const newTags = filters.tags.includes(tag.id)
+                      ? filters.tags.filter(t => t !== tag.id)
+                      : [...filters.tags, tag.id]
+                    setFilters({...filters, tags: newTags})
+                  }}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-all flex items-center gap-1.5 ${
+                    filters.tags.includes(tag.id)
+                      ? `bg-gradient-to-r ${tag.color} text-white`
+                      : 'bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800/70'
+                  }`}
+                >
+                  {tag.name}
+                  {filters.tags.includes(tag.id) && <span className="text-xs">×</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Template sections remain the same... */}
+      
+    </div>
+  )
+}
+
+export default PremiumTemplatesView

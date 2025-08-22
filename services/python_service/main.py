@@ -607,6 +607,17 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         # Ignore malformed recs
         pass
 
+    # Mild seeded variance to letter spacing for diversity (unless explicitly overridden above)
+    try:
+        if not isinstance(headline_letter_spacing, (int, float)):
+            headline_letter_spacing = 0.0
+        if not isinstance(body_letter_spacing, (int, float)):
+            body_letter_spacing = 0.0
+        headline_letter_spacing = float(headline_letter_spacing) + round(rng.uniform(-0.4, 0.6), 2)
+        body_letter_spacing = float(body_letter_spacing) + round(rng.uniform(-0.2, 0.4), 2)
+    except Exception:
+        pass
+
     # Determine panel side: explicit override > smart layout > default left
     panel_side = "left"
     try:
@@ -755,6 +766,13 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     sub_ranges = em.get("subheadline") or []
 
     # Iteratively reduce sizes until both text blocks fit above CTA
+    # Additional seeded variance for rhythm
+    line_gap_factor = v.get("line_gap_factor")
+    if not isinstance(line_gap_factor, (int, float)):
+        line_gap_factor = rng.uniform(0.9, 1.12)
+    sub_gap_factor = v.get("sub_gap_factor")
+    if not isinstance(sub_gap_factor, (int, float)):
+        sub_gap_factor = rng.uniform(0.9, 1.12)
     # and within content width using word wrapping.
     max_attempts = 12
     attempt = 0
@@ -771,8 +789,8 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         sub_segments = _segments_by_line(subheadline, sub_lines, sub_ranges)
 
         # Vertical rhythm with current sizes
-        line_gap = int(headline_size * 0.28)
-        sub_gap = int(sub_size * 0.24)
+        line_gap = int(headline_size * 0.28 * float(line_gap_factor))
+        sub_gap = int(sub_size * 0.24 * float(sub_gap_factor))
         headline_y_start = padding + headline_size
         headline_block_h = len(headline_segments) * headline_size + max(0, (len(headline_segments) - 1) * line_gap)
         subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
@@ -919,8 +937,8 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             attempts += 1
             headline_size = max(30, int(headline_size * 0.94))
             sub_size = max(16, int(sub_size * 0.94))
-            line_gap = int(headline_size * 0.28)
-            sub_gap = int(sub_size * 0.24)
+            line_gap = int(headline_size * 0.28 * float(line_gap_factor))
+            sub_gap = int(sub_size * 0.24 * float(sub_gap_factor))
             max_chars_headline = _measure_chars_for_width(content_width, headline_size)
             max_chars_sub = _measure_chars_for_width(content_width, sub_size)
             headline_lines = _wrap_text(headline, max_chars_headline)
@@ -960,23 +978,63 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         # Best-effort; fallback values from earlier remain
         pass
 
-    # SVG template with legibility gradient (applied only when an image exists) and a clean fallback background
-    # Scrim/gradient strength variance
+    # SVG template with optional legibility scrim and seeded image filter variance
     try:
+        def _clip(x: float, lo: float, hi: float) -> float:
+            return max(lo, min(hi, x))
+        # Allow explicit enable via variant; default off to remove unwanted black box overlay
+        show_scrim = bool(v.get("show_scrim", False))
+        # Background fit behavior for <image>: 'meet' (no crop, may letterbox) or 'slice' (cover, may crop)
+        bg_fit = str(v.get("bg_fit", "slice")).lower()
+        if bg_fit not in ("meet", "slice"):
+            bg_fit = "meet"
+        preserve_mode = f"xMidYMid {'slice' if bg_fit == 'slice' else 'meet'}"
+
+        # Keep scrim params available if enabled
         shade_factor = v.get("shade_factor")
         if not isinstance(shade_factor, (int, float)):
             shade_factor = rng.uniform(0.9, 1.15)
-        def _clip(x: float, lo: float, hi: float) -> float:
-            return max(lo, min(hi, x))
-        shade_main_opacity = _clip(0.35 * float(shade_factor), 0.22, 0.55)
-        shade_mid_opacity = _clip(0.20 * float(shade_factor), 0.12, 0.35)
-        shade_end_opacity = _clip(0.08 * float(shade_factor), 0.04, 0.16)
+        shade_main_opacity = _clip(0.35 * float(shade_factor), 0.18, 0.45)
+        shade_mid_opacity = _clip(0.20 * float(shade_factor), 0.10, 0.28)
+        shade_end_opacity = _clip(0.08 * float(shade_factor), 0.03, 0.12)
         side_shade_factor = v.get("side_shade_factor")
         if not isinstance(side_shade_factor, (int, float)):
             side_shade_factor = rng.uniform(0.9, 1.2)
-        side_shade_opacity = _clip(0.55 * float(side_shade_factor), 0.40, 0.70)
+        side_shade_opacity = _clip(0.48 * float(side_shade_factor), 0.32, 0.62)
+
+        # Prompt-influenced image filter variance
+        prompt_text = f"{copy_data.get('headline','')} {copy_data.get('subheadline','')}".lower()
+        strong_keywords = ["bold", "sale", "deal", "new", "limited", "fitness", "energy", "power", "high", "premium"]
+        soft_keywords = ["calm", "eco", "natural", "gentle", "soft", "soothing", "minimal", "organic"]
+        mode = "neutral"
+        if any(k in prompt_text for k in strong_keywords):
+            mode = "strong"
+        elif any(k in prompt_text for k in soft_keywords):
+            mode = "soft"
+
+        if mode == "strong":
+            contrast = _clip(rng.uniform(1.15, 1.35), 0.7, 1.6)
+            brightness = _clip(rng.uniform(0.98, 1.08), 0.7, 1.6)
+            saturate = _clip(rng.uniform(1.10, 1.30), 0.3, 2.5)
+        elif mode == "soft":
+            contrast = _clip(rng.uniform(0.85, 0.98), 0.7, 1.6)
+            brightness = _clip(rng.uniform(1.02, 1.12), 0.7, 1.6)
+            saturate = _clip(rng.uniform(0.85, 1.05), 0.3, 2.5)
+        else:
+            contrast = _clip(rng.uniform(0.95, 1.15), 0.7, 1.6)
+            brightness = _clip(rng.uniform(0.96, 1.08), 0.7, 1.6)
+            saturate = _clip(rng.uniform(0.95, 1.15), 0.3, 2.5)
+
+        # Convert brightness & contrast to linear component transfer
+        img_slope = float(contrast * brightness)
+        img_intercept = float(0.5 * (1.0 - contrast) * brightness)
+        img_saturate = float(saturate)
     except Exception:
-        shade_main_opacity, shade_mid_opacity, shade_end_opacity, side_shade_opacity = 0.35, 0.20, 0.08, 0.55
+        show_scrim = False
+        # Fallbacks to safe defaults
+        shade_main_opacity, shade_mid_opacity, shade_end_opacity, side_shade_opacity = 0.28, 0.16, 0.06, 0.50
+        img_slope, img_intercept, img_saturate = 1.0, 0.0, 1.0
+        preserve_mode = "xMidYMid slice"
     try:
         # If CTA still lands in bottom gutter, lift text block and CTA together
         bottom_gutter = int(height * 0.12)
@@ -1022,6 +1080,14 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 <stop offset="0%" stop-color="#1f2937" stop-opacity="1" />
                 <stop offset="100%" stop-color="#111827" stop-opacity="1" />
             </linearGradient>
+            <filter id="imgFilter" x="-50%" y="-50%" width="200%" height="200%">
+                <feComponentTransfer>
+                    <feFuncR type="linear" slope="{{ img_slope }}" intercept="{{ img_intercept }}" />
+                    <feFuncG type="linear" slope="{{ img_slope }}" intercept="{{ img_intercept }}" />
+                    <feFuncB type="linear" slope="{{ img_slope }}" intercept="{{ img_intercept }}" />
+                </feComponentTransfer>
+                <feColorMatrix type="saturate" values="{{ img_saturate }}" />
+            </filter>
             <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
                 <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
             </filter>
@@ -1029,22 +1095,26 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
         <!-- Background -->
         {% if original_url %}
-        <image xlink:href="{{ original_url }}" x="0" y="0" width="{{ width }}" height="{{ height }}" preserveAspectRatio="xMidYMid meet"/>
-        <!-- Legibility gradient overlay -->
+        <image xlink:href="{{ original_url }}" x="0" y="0" width="{{ width }}" height="{{ height }}" preserveAspectRatio="{{ preserve_mode }}" filter="url(#imgFilter)"/>
+        {% if show_scrim %}
+        <!-- Optional legibility gradient overlay -->
         <rect width="100%" height="100%" fill="url(#shade)" />
+        {% endif %}
         {% else %}
         <rect width="100%" height="100%" fill="url(#bg)" />
         {% endif %}
 
         <!-- Content -->
         <g>
-            <!-- Stronger side scrim for text legibility -->
+            {% if show_scrim %}
+            <!-- Side scrim for text legibility (optional) -->
             {% if panel_side == 'left' %}
             <rect x="0" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shadeLeft)" />
             {% elif panel_side == 'right' %}
             <rect x="{{ width - text_panel_w }}" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shadeRight)" />
             {% else %}
             <rect x="{{ center_x }}" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shade)" />
+            {% endif %}
             {% endif %}
             <!-- Headline with emphasis tspans -->
             <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{{ text_color }}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)">
@@ -1118,12 +1188,18 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         cta_color=cta_color,
         text_panel_w=text_panel_w,
         original_url=img_href,
+        preserve_mode=preserve_mode,
         # scrim/gradient vars
         shade_main_opacity=shade_main_opacity,
         shade_mid_opacity=shade_mid_opacity,
         shade_end_opacity=shade_end_opacity,
         side_shade_opacity=side_shade_opacity,
         center_x=center_x,
+        show_scrim=show_scrim,
+        # image filter vars
+        img_slope=img_slope,
+        img_intercept=img_intercept,
+        img_saturate=img_saturate,
         # CTA style vars
         cta_radius=cta_radius,
         cta_fill=cta_fill,

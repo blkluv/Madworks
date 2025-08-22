@@ -25,7 +25,7 @@ const nextConfig = {
   },
   // Required for API routes to work with Vercel Serverless Functions
   experimental: {
-    serverActions: true,
+    serverActions: {},
   },
 }
 

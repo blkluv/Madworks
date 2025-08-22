@@ -1,5 +1,6 @@
 "use client"
 
+import React from 'react'
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Heart, Download, Eye, TrendingUp, Crown, Zap, Code } from "lucide-react"
@@ -113,8 +114,13 @@ const mockAITemplates = [
 ]
 
 export function PremiumTemplatesView() {
-  const [selectedCategory, setSelectedCategory] = useState("all")
-  const [sortBy, setSortBy] = useState("popular")
+  const [filters, setFilters] = useState({
+    category: "all",
+    templateType: "all", // 'developer', 'ai', 'all'
+    sortBy: "popular", // 'popular', 'newest', 'downloads', 'rating'
+    tags: [] as string[],
+    searchQuery: ""
+  })
 
   const categories = [
     { value: "all", label: "All Categories" },
@@ -128,9 +134,16 @@ export function PremiumTemplatesView() {
 
   const sortOptions = [
     { value: "popular", label: "Most Popular" },
-    { value: "recent", label: "Most Recent" },
+    { value: "newest", label: "Newest First" },
     { value: "downloads", label: "Most Downloaded" },
-    { value: "score", label: "Highest Score" },
+    { value: "rating", label: "Highest Rated" },
+  ]
+
+  const availableTags = [
+    { id: "featured", name: "Featured", color: "from-indigo-600 to-indigo-700" },
+    { id: "trending", name: "Trending", color: "from-pink-600 to-rose-500" },
+    { id: "new", name: "New", color: "from-emerald-500 to-teal-500" },
+    { id: "free", name: "Free", color: "from-amber-500 to-orange-500" },
   ]
 
   const formatDate = (dateString: string) => {
@@ -146,7 +159,7 @@ export function PremiumTemplatesView() {
   }
 
   return (
-    <div className="w-full max-w-none px-4 md:px-8 space-y-8">
+    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header */}
       <div className="text-center">
         <div className="flex items-center justify-center gap-3 mb-4">
@@ -160,8 +173,8 @@ export function PremiumTemplatesView() {
         </p>
       </div>
 
-      {/* Premium Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* Premium Stats - Centered with max width */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 max-w-7xl mx-auto mb-8">
         <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl shadow-sm">
@@ -195,57 +208,119 @@ export function PremiumTemplatesView() {
             </div>
           </div>
         </Card>
-        <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-gradient-to-br from-pink-500 to-pink-600 rounded-2xl shadow-sm">
-              <TrendingUp className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <p className="text-gray-400 text-sm font-medium">Avg. Performance</p>
-              <p className="text-white text-xl font-bold">94%</p>
-            </div>
-          </div>
-        </Card>
       </div>
 
-      {/* Filter Bar */}
-      <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg">
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="flex items-center gap-3">
-              <span className="text-white font-semibold">Category:</span>
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="px-4 py-2 bg-zinc-900/70 border border-zinc-800 text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300 rounded-2xl"
-              >
-                {categories.map((category) => (
-                  <option key={category.value} value={category.value}>
-                    {category.label}
-                  </option>
-                ))}
-              </select>
+      {/* Enhanced Filter Bar */}
+      <Card className="bg-zinc-950/80 border border-zinc-900 backdrop-blur p-6 rounded-2xl shadow-lg mb-8">
+        <div className="space-y-6">
+          {/* Search Bar */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search templates..."
+              value={filters.searchQuery}
+              onChange={(e) => setFilters({...filters, searchQuery: e.target.value})}
+              className="w-full px-4 py-3 bg-zinc-900/70 border border-zinc-800 text-zinc-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300 pl-12"
+            />
+            <svg
+              className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-zinc-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Template Type Filter */}
+              <div className="flex flex-col">
+                <span className="text-sm text-zinc-400 mb-1">Template Type</span>
+                <div className="flex items-center gap-2 bg-zinc-900/50 p-1 rounded-xl">
+                  {[
+                    { value: 'all', label: 'All' },
+                    { value: 'developer', label: 'Developer' },
+                    { value: 'ai', label: 'AI Generated' }
+                  ].map((type) => (
+                    <button
+                      key={type.value}
+                      onClick={() => setFilters({...filters, templateType: type.value as any})}
+                      className={`px-4 py-2 text-sm rounded-lg transition-colors ${filters.templateType === type.value 
+                        ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white' 
+                        : 'text-zinc-300 hover:bg-zinc-800/50'}`}
+                    >
+                      {type.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Category Filter */}
+              <div className="flex flex-col">
+                <span className="text-sm text-zinc-400 mb-1">Category</span>
+                <select
+                  value={filters.category}
+                  onChange={(e) => setFilters({...filters, category: e.target.value})}
+                  className="px-4 py-2 bg-zinc-900/70 border border-zinc-800 text-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300"
+                >
+                  {categories.map((category) => (
+                    <option key={category.value} value={category.value}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Sort By */}
+              <div className="flex flex-col">
+                <span className="text-sm text-zinc-400 mb-1">Sort By</span>
+                <select
+                  value={filters.sortBy}
+                  onChange={(e) => setFilters({...filters, sortBy: e.target.value as any})}
+                  className="px-4 py-2 bg-zinc-900/70 border border-zinc-800 text-zinc-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300"
+                >
+                  {sortOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-white font-semibold">Sort by:</span>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="px-4 py-2 bg-zinc-900/70 border border-zinc-800 text-zinc-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 transition-all duration-300 rounded-2xl"
-              >
-                {sortOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+          </div>
+
+          {/* Tags Filter */}
+          <div className="space-y-2">
+            <span className="text-sm text-zinc-400">Popular Tags</span>
+            <div className="flex flex-wrap gap-2">
+              {availableTags.map((tag) => (
+                <button
+                  key={tag.id}
+                  onClick={() => {
+                    const newTags = filters.tags.includes(tag.id)
+                      ? filters.tags.filter(t => t !== tag.id)
+                      : [...filters.tags, tag.id]
+                    setFilters({...filters, tags: newTags})
+                  }}
+                  className={`px-3 py-1.5 text-sm rounded-full transition-all flex items-center gap-1.5 ${
+                    filters.tags.includes(tag.id)
+                      ? `bg-gradient-to-r ${tag.color} text-white`
+                      : 'bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800/70'
+                  }`}
+                >
+                  {tag.name}
+                  {filters.tags.includes(tag.id) && <span className="text-xs">×</span>}
+                </button>
+              ))}
             </div>
           </div>
         </div>
       </Card>
 
       {/* Developer Created Templates */}
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-7xl mx-auto">
         <div className="flex items-center gap-3">
           <Code className="w-6 h-6 text-indigo-400" />
           <h2 className="text-2xl font-bold text-white">Developer Created Templates</h2>
@@ -253,7 +328,7 @@ export function PremiumTemplatesView() {
             Premium
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {mockDeveloperTemplates.map((template) => (
             <Card
               key={template.id}
@@ -343,7 +418,7 @@ export function PremiumTemplatesView() {
       </div>
 
       {/* Most-Used AI-Generated Templates */}
-      <div className="space-y-6">
+      <div className="space-y-6 pt-8 max-w-7xl mx-auto">
         <div className="flex items-center gap-3">
           <Zap className="w-6 h-6 text-emerald-400" />
           <h2 className="text-2xl font-bold text-white">Most-Used AI-Generated Templates</h2>
@@ -351,7 +426,7 @@ export function PremiumTemplatesView() {
             AI Powered
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {mockAITemplates.map((template) => (
             <Card
               key={template.id}

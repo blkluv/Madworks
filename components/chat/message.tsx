@@ -1,7 +1,6 @@
 import { cn } from "@/lib/utils"
 import { format } from "date-fns"
-import { ImageIcon, User, Bot } from "lucide-react"
-import Image from "next/image"
+import { User, Bot } from "lucide-react"
 
 type Attachment = {
   type: 'image'
@@ -20,6 +19,8 @@ type MessageProps = {
 
 export function Message({ role, content, attachments, timestamp, isGrouped = false }: MessageProps) {
   const isUser = role === 'user'
+  const hasContent = !!content && content.trim().length > 0
+  const hasAttachments = !!attachments && attachments.length > 0
   
   const formatTime = (dateString: string) => {
     return format(new Date(dateString), 'h:mm a')
@@ -37,12 +38,12 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
           href={img.url} 
           target="_blank" 
           rel="noopener noreferrer"
-          className="block mt-2 rounded-lg overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors relative"
+          className="block rounded-lg overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors relative"
         >
           <img 
             src={img.url} 
             alt="Attachment"
-            className="w-full max-h-[500px] object-contain bg-black/30"
+            className="max-w-full h-auto block"
           />
           {img.variant && (
             <span className="absolute top-2 left-2 bg-black/70 text-xs px-2 py-0.5 rounded-md border border-white/10">
@@ -56,7 +57,7 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
     // For multiple images, show a grid
     return (
       <div className={cn(
-        "grid gap-2 mt-2",
+        "grid gap-2",
         count <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3"
       )}>
         {attachments.map((img, i) => (
@@ -65,12 +66,12 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
             href={img.url} 
             target="_blank" 
             rel="noopener noreferrer"
-            className="block rounded-md overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors aspect-square relative"
+            className="block rounded-md overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors relative"
           >
             <img 
               src={img.url} 
               alt={`Attachment ${i + 1}`}
-              className="w-full h-full object-contain bg-black/30"
+              className="w-full h-auto block"
             />
             {img.variant && (
               <span className="absolute top-1.5 left-1.5 bg-black/70 text-[10px] px-1.5 py-[2px] rounded border border-white/10">
@@ -111,19 +112,24 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
         )}
         
         <div className={cn(
-          "rounded-xl p-3 text-sm",
+          "rounded-xl text-sm",
+          hasContent ? 'p-3' : 'p-0',
           isUser 
             ? 'bg-black/50 border border-zinc-700/60' 
             : 'bg-zinc-700/40 border border-zinc-700/50'
         )}>
-          {content && (
+          {hasContent && (
             <div className="prose prose-invert prose-sm max-w-none">
               {content.split('\n').map((line, i) => (
                 <p key={i}>{line || <br />}</p>
               ))}
             </div>
           )}
-          {renderAttachments()}
+          {hasAttachments && (
+            <div className={cn(hasContent ? "-mx-3 -mb-3 mt-2" : undefined)}>
+              {renderAttachments()}
+            </div>
+          )}
         </div>
       </div>
       
