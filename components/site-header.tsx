@@ -43,15 +43,19 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             aria-label="Go to Home"
             title="Madworks AI - Home"
           >
-            <Image
-              src="/mwlogo1.png"
-              alt="Madworks logo"
-              width={40}
-              height={40}
-              className="rounded-xl"
-              priority
-            />
-            <h1 className="text-2xl font-bold text-white">Madworks AI</h1>
+            <div className="flex items-center gap-4">
+              <Image
+                src="/mwlg2.png"
+                alt="Madworks logo"
+                width={150}
+                height={50}
+                className="h-12 w-auto object-contain"
+                priority
+              />
+              <span className="text-3xl font-bold text-white">
+                Madworks AI
+              </span>
+            </div>
           </div>
 
           <div className="justify-self-center">
