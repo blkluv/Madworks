@@ -9,16 +9,20 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 import uuid
+import shutil
+import re
 
 import openai
+from time import perf_counter
 # cairosvg is lazily imported in the render path to avoid startup failures
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import cv2
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator
 import boto3
 from dotenv import load_dotenv
 import aiofiles
@@ -36,10 +40,97 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Windows: prefer Selector event loop to reduce noisy ConnectionResetError logs from Proactor
+if os.name == "nt":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    except Exception:
+        pass
+
+    # Help CairoSVG find native cairo DLLs without requiring global PATH edits.
+    # Set CAIRO_DLL_DIR in your environment or .env to the folder that contains cairo-2.dll.
+    try:
+        cairo_dll_dir = (os.getenv("CAIRO_DLL_DIR", "").strip())
+        added = False
+        if cairo_dll_dir and hasattr(os, "add_dll_directory") and os.path.isdir(cairo_dll_dir):
+            os.add_dll_directory(cairo_dll_dir)
+            logger.info(f"Added CAIRO_DLL_DIR to DLL search path: {cairo_dll_dir}")
+            added = True
+
+        # Best-effort fallbacks if env var not provided
+        if not added and hasattr(os, "add_dll_directory"):
+            candidates = [
+                r"C:\\Program Files\\GTK3-Runtime Win64\\bin",
+                r"C:\\msys64\\mingw64\\bin",
+                r"C:\\Program Files (x86)\\GTK3-Runtime Win64\\bin",
+            ]
+            for p in candidates:
+                if os.path.isdir(p):
+                    try:
+                        os.add_dll_directory(p)
+                        logger.info(f"Added candidate Cairo DLL path: {p}")
+                        added = True
+                        break
+                    except Exception:
+                        continue
+        if not added:
+            logger.debug("No Cairo DLL directory added automatically; set CAIRO_DLL_DIR if PNG/JPG rendering fails.")
+    except Exception as _dll_e:
+        logger.debug(f"Skipping Cairo DLL directory setup: {_dll_e}")
+
+# Storage config: support S3 (MinIO) and local static file storage for easier dev/testing
+STORAGE_MODE = os.getenv('STORAGE_MODE', 'local').lower()  # 's3' or 'local'
+STORAGE_DIR = Path((os.getenv('STORAGE_DIR', str(Path(__file__).resolve().parent / 'storage'))).strip()).resolve()
+STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', 'http://localhost:8010').rstrip('/')
+
+# Define all required directories
+REQUIRED_DIRS = [
+    STORAGE_DIR / 'uploads' / 'tmp',
+    STORAGE_DIR / 'outputs',
+    STORAGE_DIR / 'static',
+    STORAGE_DIR / 'assets'  # Added assets directory for storing static assets
+]
+
+# Create all required directories
+for directory in REQUIRED_DIRS:
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created directory: {directory}")
+    except Exception as e:
+        logger.error(f"Failed to create directory {directory}: {e}")
+        raise
+
+# Streaming upload/config defaults (tunable via env)
+UPLOAD_MAX_MB = int(os.getenv("UPLOAD_MAX_MB", "50"))  # hard cap on accepted upload size
+UPLOAD_CHUNK_KB = int(os.getenv("UPLOAD_CHUNK_KB", "512"))  # chunk size for reading request body
+UPLOAD_READ_TIMEOUT_S = float(os.getenv("UPLOAD_READ_TIMEOUT_S", "10"))  # per-chunk read timeout
+DATA_URL_MAX_CHARS = int(os.getenv("DATA_URL_MAX_CHARS", "8000000"))  # ~8MB of base64 text
+
+# Set up upload directory
+UPLOAD_DIR_TEMP = Path(os.getenv("UPLOAD_DIR_TEMP", "").strip() or str(STORAGE_DIR / "uploads" / "tmp")).resolve()
+UPLOAD_DIR_TEMP.mkdir(parents=True, exist_ok=True)
+
+# Set up outputs directory
+OUTPUTS_DIR = (STORAGE_DIR / 'outputs').resolve()
+OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+
+PROCESS_TIMEOUT_S = float(os.getenv("PROCESS_TIMEOUT_S", "30"))  # analysis processing timeout
+
+# GPT layout integration flags
+USE_GPT_LAYOUT = (os.getenv("USE_GPT_LAYOUT", "true").strip().lower() in ("1", "true", "yes", "on"))
+LAYOUT_MODEL = os.getenv("LAYOUT_MODEL", "gpt-5")
+LAYOUT_TEMPERATURE = float(os.getenv("LAYOUT_TEMPERATURE", "0.6"))
+
+# Rasterization flags for non-Docker/local setups
+# Set RENDER_RASTER=false to skip PNG/JPG generation entirely (SVG-only outputs)
+RENDER_RASTER = (os.getenv("RENDER_RASTER", "false").strip().lower() in ("1", "true", "yes", "on"))
+
 # Initialize OpenAI client
-client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-if not client.api_key:
-    raise ValueError("OPENAI_API_KEY environment variable is required")
+_OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+client = openai.AsyncOpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY else None
+if not _OPENAI_API_KEY:
+    logger.warning("OPENAI_API_KEY not set; AI copy will use deterministic fallback.")
 
 # Initialize S3 client for MinIO
 s3_client = boto3.client(
@@ -52,20 +143,38 @@ s3_client = boto3.client(
 
 app = FastAPI(title="Madworks AI Pipeline", version="1.1.0")
 
-# Storage config: support S3 (MinIO) and local static file storage for easier dev/testing
-STORAGE_MODE = os.getenv('STORAGE_MODE', 's3').lower()  # 's3' or 'local'
-STORAGE_DIR = os.getenv('STORAGE_DIR', str(Path(__file__).resolve().parent / 'storage'))
-PUBLIC_BASE_URL = os.getenv('PUBLIC_BASE_URL', 'http://localhost:8010').rstrip('/')
+# CORS middleware: allow browser clients (Next.js app) to call this API directly.
+# Configure via CORS_ALLOW_ORIGINS env (comma-separated). Defaults are dev-friendly.
+origins_env = os.getenv("CORS_ALLOW_ORIGINS", "").strip()
+if not origins_env:
+    allow_origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8010",
+        "http://127.0.0.1:8010",
+        "*",
+    ]
+else:
+    allow_origins = [o.strip() for o in origins_env.split(",") if o.strip()]
+# If wildcard is present, set credentials False and pass ["*"] per Starlette rules
+use_wildcard = "*" in allow_origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if use_wildcard else allow_origins,
+    allow_credentials=False if use_wildcard else True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Ensure local storage directory exists and mount when in local mode
+# Ensure local storage directory exists and mount static directories (best-effort)
 try:
-    Path(STORAGE_DIR).mkdir(parents=True, exist_ok=True)
-    app.mount("/static", StaticFiles(directory=STORAGE_DIR), name="static")
+    STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(STORAGE_DIR)), name="static")
     # Extra aliases so clients can fetch both /static/... and /outputs/... paths
     # This covers cases where URLs are constructed as /outputs/{bucket}/{key}
     # (e.g., outputs/outputs/...) or /assets/... without the /static prefix.
-    app.mount("/outputs", StaticFiles(directory=STORAGE_DIR), name="outputs")
-    app.mount("/assets", StaticFiles(directory=STORAGE_DIR), name="assets")
+    app.mount("/outputs", StaticFiles(directory=str(STORAGE_DIR)), name="outputs")
+    app.mount("/assets", StaticFiles(directory=str(STORAGE_DIR)), name="assets")
 except Exception as _e:
     # Mounting static is best-effort; S3 mode might not need this
     pass
@@ -91,6 +200,8 @@ class CopyInput(BaseModel):
     tone: Optional[str] = None
     style_guide: Optional[str] = None
     platform: Optional[str] = None  # e.g., instagram_feed, story, linkedin
+    # Pydantic v2: avoid conflict with protected namespace for `model_name`
+    model_config = {"protected_namespaces": ()}
 
 class ImageAnalysis(BaseModel):
     mask_url: str
@@ -138,22 +249,39 @@ class CopyVariantStructured(BaseModel):
 
 # Utility functions
 def extract_palette(image: Image.Image, num_colors: int = 5) -> List[str]:
-    """Extract dominant colors from image"""
+    """Extract dominant colors from image using Pillow quantization (no sklearn).
+    Returns a list of hex strings like ['#rrggbb', ...].
+    """
     # Convert to RGB if needed
     if image.mode != 'RGB':
         image = image.convert('RGB')
-    
+
     # Resize for faster processing
     small_image = image.resize((150, 150))
-    pixels = np.array(small_image).reshape(-1, 3)
-    
-    # Use k-means to find dominant colors
-    from sklearn.cluster import KMeans
-    kmeans = KMeans(n_clusters=num_colors, random_state=42)
-    kmeans.fit(pixels)
-    colors = kmeans.cluster_centers_.astype(int)
-    
-    return [f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}" for color in colors]
+
+    # Quantize to a palette of num_colors
+    paletted = small_image.convert('P', palette=Image.ADAPTIVE, colors=max(1, num_colors))
+
+    # Get palette and color frequencies
+    palette = paletted.getpalette() or []  # flat list [r0,g0,b0, r1,g1,b1, ...]
+    max_colors = paletted.width * paletted.height
+    counts = paletted.getcolors(maxcolors=max_colors) or []  # list of (count, index)
+
+    # Sort by frequency descending and map indices to RGB
+    counts.sort(key=lambda x: x[0], reverse=True)
+    result: List[str] = []
+    for _, idx in counts[:num_colors]:
+        base = int(idx) * 3
+        if base + 2 < len(palette):
+            r, g, b = palette[base], palette[base + 1], palette[base + 2]
+            result.append(f"#{int(r):02x}{int(g):02x}{int(b):02x}")
+
+    # Ensure we return at least one color
+    if not result:
+        r, g, b = small_image.resize((1, 1)).getpixel((0, 0))
+        result = [f"#{int(r):02x}{int(g):02x}{int(b):02x}"]
+
+    return result
 
 def detect_foreground(image: Image.Image) -> Tuple[Image.Image, List[int]]:
     """Detect foreground using OpenCV"""
@@ -252,6 +380,15 @@ async def generate_copy_with_ai(
 
     Returns a list of copy dicts, each with keys: headline, subheadline, cta.
     """
+    # Short-circuit: no API key/client -> deterministic fallback (server still works)
+    if not client or not _OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY missing; returning deterministic fallback copy")
+        return [{
+            "headline": "Professional Excellence",
+            "subheadline": "Quality that delivers results",
+            "cta": constraints.allowed_cta[0]
+        }]
+
     try:
         # Build the prompt with optional tone/platform/style guide
         addl = []
@@ -289,15 +426,17 @@ async def generate_copy_with_ai(
         variants: List[Dict[str, str]] = []
         n = max(1, int(num_variants))
         for _ in range(n):
-            response = await client.chat.completions.create(
-                model=model,
-                messages=[
+            chat_args = {
+                "model": model,
+                "messages": [
                     {"role": "system", "content": "You are an expert advertising copywriter who outputs strict JSON only."},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
-                temperature=float(temperature),
-                max_tokens=220
-            )
+            }
+            # Some models (e.g., gpt-5 family) only support default temperature; omit to avoid 400s
+            if not str(model).strip().lower().startswith("gpt-5"):
+                chat_args["temperature"] = float(temperature)
+            response = await client.chat.completions.create(**chat_args)
 
             content = response.choices[0].message.content.strip()
 
@@ -349,6 +488,269 @@ async def generate_copy_with_ai(
             "subheadline": "Quality that delivers results",
             "cta": constraints.allowed_cta[0]
         }]
+
+# GPT layout generation and validation
+def _clamp_float(x: Any, lo: float, hi: float, default: Optional[float] = None) -> Optional[float]:
+    try:
+        v = float(x)
+        if v != v or v in (float("inf"), float("-inf")):
+            return default
+        return max(lo, min(hi, v))
+    except Exception:
+        return default
+
+def _to_bool(x: Any) -> Optional[bool]:
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, (int, float)):
+        return bool(int(x))
+    if isinstance(x, str):
+        s = x.strip().lower()
+        if s in ("true", "1", "yes", "on"):
+            return True
+        if s in ("false", "0", "no", "off"):
+            return False
+    return None
+
+def _sanitize_layout_variant(raw: Dict[str, Any], palette: List[str]) -> Dict[str, Any]:
+    """Allow only known keys and clamp/coerce values to safe ranges."""
+    try:
+        if not isinstance(raw, dict):
+            return {}
+        out: Dict[str, Any] = {}
+        allowed_styles = {"fill", "outline", "pill"}
+        allowed_width_modes = {"auto", "wide"}
+        allowed_panel_side = {"left", "right", "center"}
+        allowed_bg_fit = {"meet", "slice"}
+        allowed_headline_fill = {"gradient", "solid"}
+        allowed_panel_style = {"none", "card"}
+        pal_len = max(0, len(palette or []))
+
+        # seed
+        if "seed" in raw:
+            try:
+                out["seed"] = int(raw["seed"])
+            except Exception:
+                pass
+
+        # floats with clamps
+        ts = _clamp_float(raw.get("type_scale"), 0.80, 1.40, None)
+        if ts is not None:
+            out["type_scale"] = ts
+        pwidth = _clamp_float(raw.get("panel_width_factor"), 0.40, 0.85, None)
+        if pwidth is not None:
+            out["panel_width_factor"] = pwidth
+        lg = _clamp_float(raw.get("line_gap_factor"), 0.80, 1.50, None)
+        if lg is not None:
+            out["line_gap_factor"] = lg
+        sg = _clamp_float(raw.get("sub_gap_factor"), 0.80, 1.80, None)
+        if sg is not None:
+            out["sub_gap_factor"] = sg
+        cg = _clamp_float(raw.get("cta_gap_scale"), 0.60, 1.80, None)
+        if cg is not None:
+            out["cta_gap_scale"] = cg
+        shade = _clamp_float(raw.get("shade_factor"), 0.0, 0.80, None)
+        if shade is not None:
+            out["shade_factor"] = shade
+        side_shade = _clamp_float(raw.get("side_shade_factor"), 0.0, 0.80, None)
+        if side_shade is not None:
+            out["side_shade_factor"] = side_shade
+
+        # enums / booleans
+        ps = raw.get("panel_side")
+        if isinstance(ps, str) and ps.strip().lower() in allowed_panel_side:
+            out["panel_side"] = ps.strip().lower()
+        fp = _to_bool(raw.get("flip_panel"))
+        if fp is not None:
+            out["flip_panel"] = fp
+        show_scrim = _to_bool(raw.get("show_scrim"))
+        if show_scrim is not None:
+            out["show_scrim"] = show_scrim
+        cstyle = (raw.get("cta_style") or "").strip().lower()
+        if cstyle in allowed_styles:
+            out["cta_style"] = cstyle
+        wmode = (raw.get("cta_width_mode") or "").strip().lower()
+        if wmode in allowed_width_modes:
+            out["cta_width_mode"] = wmode
+        bgf = (raw.get("bg_fit") or "").strip().lower()
+        if bgf in allowed_bg_fit:
+            out["bg_fit"] = bgf
+        hf = (raw.get("headline_fill") or "").strip().lower()
+        if hf in allowed_headline_fill:
+            out["headline_fill"] = hf
+        pstyle = (raw.get("panel_style") or "").strip().lower()
+        if pstyle in allowed_panel_style:
+            out["panel_style"] = pstyle
+
+        # accent_index
+        if "accent_index" in raw:
+            try:
+                ai = int(raw.get("accent_index"))
+                if pal_len > 0:
+                    ai = max(0, min(pal_len - 1, ai))
+                else:
+                    ai = max(0, ai)
+                out["accent_index"] = ai
+            except Exception:
+                pass
+
+        # badge_text
+        if "badge_text" in raw and isinstance(raw.get("badge_text"), str):
+            out["badge_text"] = raw.get("badge_text")[:80]
+
+        return out
+    except Exception:
+        return {}
+
+async def generate_layout_variant_with_ai(
+    copy_data: Dict[str, Any],
+    analysis: Dict[str, Any],
+    crop_info: Dict[str, Any],
+    base_variant: Optional[Dict[str, Any]] = None,
+    *,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Ask the GPT layout model for safe layout overrides. Returns sanitized dict; may be empty."""
+    try:
+        if not USE_GPT_LAYOUT:
+            return {}
+        if not client or not _OPENAI_API_KEY:
+            logger.warning("generate_layout_variant_with_ai: OpenAI client not configured; skipping")
+            return {}
+
+        palette: List[str] = []
+        try:
+            palette = [c for c in (analysis.get("palette") or []) if isinstance(c, str)]
+        except Exception:
+            palette = []
+        width = int(crop_info.get("width", 1080))
+        height = int(crop_info.get("height", 1080))
+        bbox = analysis.get("foreground_bbox") or []
+
+        allowed_keys_doc = [
+            "seed (int)",
+            "type_scale (float 0.80–1.40)",
+            "panel_side ('left'|'right'|'center')",
+            "flip_panel (bool)",
+            "panel_width_factor (float 0.40–0.85)",
+            "cta_style ('fill'|'outline'|'pill')",
+            "cta_width_mode ('auto'|'wide')",
+            "accent_index (int index into palette)",
+            "line_gap_factor (float 0.80–1.50)",
+            "sub_gap_factor (float 0.80–1.80)",
+            "cta_gap_scale (float 0.60–1.80)",
+            "show_scrim (bool)",
+            "bg_fit ('meet'|'slice')",
+            "shade_factor (float 0.0–0.80)",
+            "side_shade_factor (float 0.0–0.80)",
+            "headline_fill ('gradient'|'solid')",
+            "panel_style ('none'|'card')",
+            "badge_text (string <=80 chars)",
+        ]
+
+        context = {
+            "copy": {
+                "headline": copy_data.get("headline", ""),
+                "subheadline": copy_data.get("subheadline", ""),
+                "cta": copy_data.get("cta", "Learn More"),
+            },
+            "canvas": {"width": width, "height": height},
+            "palette": palette,
+            "foreground_bbox": bbox,
+            "base_variant": base_variant or {},
+        }
+
+        prompt = (
+            "You are a senior ad layout engine. Propose layout parameters as a compact JSON object.\n"
+            "Rules:\n"
+            "- Output ONLY raw JSON, no markdown, no commentary.\n"
+            "- Include only the keys you want to override (omit unknown or null keys).\n"
+            "- Keep values within safe ranges and enums listed below.\n"
+            "- Use booleans true/false, not strings.\n\n"
+            f"Allowed keys and ranges: {json.dumps(allowed_keys_doc)}\n\n"
+            f"Context: {json.dumps(context, ensure_ascii=False)}"
+        )
+
+        _model = (model or LAYOUT_MODEL)
+        chat_args2 = {
+            "model": _model,
+            "messages": [
+                {"role": "system", "content": "You output strict JSON objects with no extra text."},
+                {"role": "user", "content": prompt},
+            ],
+        }
+        # Omit temperature for models that only accept default (e.g., gpt-5 family)
+        if not str(_model).strip().lower().startswith("gpt-5"):
+            chat_args2["temperature"] = float(temperature if temperature is not None else LAYOUT_TEMPERATURE)
+        response = await client.chat.completions.create(**chat_args2)
+        content = (response.choices[0].message.content or "").strip()
+
+        # Parse JSON robustly
+        parsed: Optional[Dict[str, Any]] = None
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            start = content.find("{")
+            end = content.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    parsed = json.loads(content[start : end + 1])
+                except Exception:
+                    parsed = None
+        if not parsed:
+            logger.warning("GPT layout returned non-JSON; ignoring")
+            return {}
+
+        sanitized = _sanitize_layout_variant(parsed, palette)
+        if sanitized:
+            logger.info(f"GPT layout overrides: {list(sanitized.keys())}")
+        return sanitized
+    except Exception as e:
+        logger.error(f"generate_layout_variant_with_ai error: {e}")
+        return {}
+
+# Simple in-memory cache for GPT layout overrides to reduce API calls
+_gpt_variant_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+try:
+    GPT_LAYOUT_CACHE_TTL_S = float(os.getenv("GPT_LAYOUT_CACHE_TTL_S", "600"))
+except Exception:
+    GPT_LAYOUT_CACHE_TTL_S = 600.0
+
+def _gpt_layout_cache_key(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any], base_variant: Dict[str, Any]) -> str:
+    try:
+        palette = [c for c in (analysis.get("palette") or []) if isinstance(c, str)][:3]
+    except Exception:
+        palette = []
+    key_obj = {
+        "h": copy_data.get("headline", ""),
+        "s": copy_data.get("subheadline", ""),
+        "c": copy_data.get("cta", ""),
+        "w": int(crop_info.get("width", 1080)),
+        "hgt": int(crop_info.get("height", 1080)),
+        "pal": palette,
+    }
+    return hashlib.sha256(json.dumps(key_obj, sort_keys=True).encode("utf-8")).hexdigest()
+
+async def get_gpt_layout_variant_cached(
+    copy_data: Dict[str, Any],
+    analysis: Dict[str, Any],
+    crop_info: Dict[str, Any],
+    base_variant: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    try:
+        if not USE_GPT_LAYOUT:
+            return {}
+        key = _gpt_layout_cache_key(copy_data, analysis, crop_info, base_variant or {})
+        now = perf_counter()
+        hit = _gpt_variant_cache.get(key)
+        if hit and (now - hit[0]) < float(GPT_LAYOUT_CACHE_TTL_S):
+            return dict(hit[1])
+        overrides = await generate_layout_variant_with_ai(copy_data, analysis, crop_info, base_variant=base_variant)
+        _gpt_variant_cache[key] = (now, overrides or {})
+        return overrides or {}
+    except Exception:
+        return {}
 
 def _measure_chars_for_width(width: int, font_size: int, avg_char_width_factor: float = 0.55) -> int:
     """Estimate how many characters fit per line for a given width and font size.
@@ -468,30 +870,60 @@ def _try_build_data_url_from_storage(original_url: str) -> Optional[str]:
         logger.warning(f"Failed to build data URL from storage: {e}")
     return None
 
+def _inline_local_images_for_raster(svg_text: str) -> str:
+    """Inline local static image hrefs (e.g., /static, /assets, /outputs) as data URLs.
+    This makes the SVG self-contained so external fetchers (e.g., Sharp/libvips) don't need HTTP.
+    """
+    if not svg_text:
+        return svg_text
+    # Match both href and xlink:href on <image ...>
+    pattern = re.compile(r"(<image\b[^>]*?\s(?:xlink:href|href)=\s*[\"\'])([^\"\']+)([\"\'])", re.IGNORECASE)
+
+    def repl(m: re.Match) -> str:
+        prefix, href, suffix = m.group(1), m.group(2), m.group(3)
+        if href.startswith("data:"):
+            return m.group(0)  # already inlined
+        # Try converting local/static URLs to data URLs
+        du = _try_build_data_url_from_storage(href)
+        if du:
+            return f"{prefix}{du}{suffix}"
+        # Also handle absolute URLs that point to our PUBLIC_BASE_URL, then map path
+        try:
+            u = urlparse(href)
+            if u.scheme in ("http", "https"):
+                # Map path part regardless of host
+                du2 = _try_build_data_url_from_storage(href)
+                if du2:
+                    return f"{prefix}{du2}{suffix}"
+        except Exception:
+            pass
+        return m.group(0)
+
+    return pattern.sub(repl, svg_text)
+
 def _resolve_img_href(analysis: Dict[str, Any]) -> str:
-    """Robustly resolve the best image href for SVG <image> tag.
-    Priority: sizeable original_data_url -> local static file -> HTTP fetch -> empty."""
+    """Resolve the best image href for SVG <image> tag.
+    Prefer direct URLs to avoid embedding huge base64 strings. Fallback to data URL only if small.
+    Priority: original_url_internal/original_url (as-is) -> sizeable-but-capped original_data_url -> local static data URL -> empty.
+    """
+    # Prefer direct URL if available
+    for key in ("original_url_internal", "original_url"):
+        url = (analysis.get(key) or "").strip()
+        if url:
+            return url
+
+    # Consider existing data URL if not excessively large
     data_url = (analysis.get("original_data_url") or "").strip()
-    # Ensure it's not an empty/placeholder tiny data URL
-    if data_url.startswith("data:") and len(data_url) > 100:
+    if data_url.startswith("data:") and len(data_url) > 100 and len(data_url) <= DATA_URL_MAX_CHARS:
         return data_url
 
-    # Try local static path from public/internal URL
+    # Try constructing a data URL from local storage if possible (useful in local mode)
     for key in ("original_url_internal", "original_url"):
         url = (analysis.get(key) or "").strip()
         if url:
             du = _try_build_data_url_from_storage(url)
-            if du:
+            if du and len(du) <= DATA_URL_MAX_CHARS:
                 return du
-            # Fallback: HTTP fetch (works in s3/minio mode)
-            try:
-                resp = requests.get(url, timeout=5)
-                if resp.ok and resp.content:
-                    mime = resp.headers.get("Content-Type", "image/png")
-                    b64 = base64.b64encode(resp.content).decode("ascii")
-                    return f"data:{mime};base64,{b64}"
-            except Exception as e:
-                logger.warning(f"HTTP fetch failed for original image: {e}")
     return ""
 
 def _normalize_hex_color(c: Optional[str]) -> Optional[str]:
@@ -544,7 +976,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     # Layout metrics
     width = int(crop_info["width"]) if "width" in crop_info else 1080
     height = int(crop_info["height"]) if "height" in crop_info else 1080
-    padding = max(40, int(min(width, height) * 0.06))
+    padding = max(40, int(min(width, height) * 0.05))
 
     # Variation profile (seeded for deterministic diversity)
     v: Dict[str, Any] = variant or {}
@@ -637,8 +1069,20 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 cx = (float(bbox[0]) + float(bbox[2])) / 2.0
                 # Normalized horizontal position in original image
                 nx = cx / float(W0)
-                # If subject on left half, place panel on right, else on left
-                panel_side = "right" if nx < 0.5 else "left"
+                # If subject region is tiny, prefer centered layout; else choose opposite side of subject
+                try:
+                    w_box = max(1.0, float(bbox[2]) - float(bbox[0]))
+                    h_box = max(1.0, float(bbox[3]) - float(bbox[1]))
+                    area_ratio = (w_box * h_box) / float(W0 * H0)
+                except Exception:
+                    area_ratio = 0.0
+                if area_ratio < 0.10:
+                    panel_side = "center"
+                else:
+                    panel_side = "right" if nx < 0.5 else "left"
+            else:
+                # No subject detected; use a centered panel for better balance
+                panel_side = "center"
     except Exception:
         pass
 
@@ -655,7 +1099,10 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     # Panel width and inner text start x with variance
     panel_width_factor = v.get("panel_width_factor")
     if not isinstance(panel_width_factor, (int, float)):
-        panel_width_factor = rng.uniform(0.56, 0.66)
+        if panel_side == "center":
+            panel_width_factor = rng.uniform(0.70, 0.82)
+        else:
+            panel_width_factor = rng.uniform(0.56, 0.66)
     text_panel_w = int(width * float(panel_width_factor))
     if panel_side == "left":
         text_x = padding
@@ -978,6 +1425,34 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         # Best-effort; fallback values from earlier remain
         pass
 
+    # If there is excessive vertical slack, center the text+CTA group within the safe area
+    try:
+        sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
+        safe_bottom = height - padding - int(cta_height * 0.30)
+        block_top = max(padding, headline_y_start - int(0.85 * headline_size))
+        block_bottom = max(subheadline_y_start + sub_block_h, cta_y + cta_height)
+        avail_top = padding
+        avail_bottom = safe_bottom
+        block_h = max(1, block_bottom - block_top)
+        avail_h = max(1, avail_bottom - avail_top)
+        slack = avail_h - block_h
+        if slack > max(20, int(height * 0.06)):
+            target_top = avail_top + int(slack / 2)
+            delta = target_top - block_top
+            headline_y_start += int(delta)
+            subheadline_y_start += int(delta)
+            cta_y += int(delta)
+            cta_text_y = cta_y + int(cta_height * 0.66)
+            # Clamp to bottom if needed
+            if cta_y + cta_height > safe_bottom:
+                overshoot = (cta_y + cta_height) - safe_bottom
+                headline_y_start -= int(overshoot)
+                subheadline_y_start -= int(overshoot)
+                cta_y -= int(overshoot)
+                cta_text_y = cta_y + int(cta_height * 0.66)
+    except Exception:
+        pass
+
     # SVG template with optional legibility scrim and seeded image filter variance
     try:
         def _clip(x: float, lo: float, hi: float) -> float:
@@ -1060,6 +1535,86 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     except Exception:
         pass
 
+    # Compute enhanced styling variables (accent variants, strokes, optional panel card and badge)
+    # Helper color utilities
+    def _hex_to_rgb(h: str):
+        try:
+            h = (h or "").lstrip('#')
+            if len(h) == 3:
+                h = ''.join([c*2 for c in h])
+            return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+        except Exception:
+            return (37, 99, 235)  # #2563EB
+
+    def _rgb_to_hex(rgb):
+        try:
+            r, g, b = [max(0, min(255, int(v))) for v in rgb]
+            return f"#{r:02x}{g:02x}{b:02x}"
+        except Exception:
+            return "#2563EB"
+
+    def _mix_rgb(c1, c2, t: float):
+        t = max(0.0, min(1.0, float(t)))
+        return (
+            int(c1[0] + (c2[0] - c1[0]) * t),
+            int(c1[1] + (c2[1] - c1[1]) * t),
+            int(c1[2] + (c2[2] - c1[2]) * t),
+        )
+
+    try:
+        base_rgb = _hex_to_rgb(cta_color)
+        white = (255, 255, 255)
+        accent_light = _rgb_to_hex(_mix_rgb(base_rgb, white, 0.35))
+    except Exception:
+        accent_light = "#ffffff"
+
+    headline_stroke_w = max(1, int(headline_size * 0.04))
+    sub_stroke_w = max(1, int(sub_size * 0.03))
+
+    # Optional visual styles via variant
+    try:
+        headline_fill = str(v.get("headline_fill", "gradient")).lower()
+        panel_style = str(v.get("panel_style", "none")).lower()
+    except Exception:
+        headline_fill = "gradient"
+        panel_style = "none"
+
+    # Panel card geometry (if enabled)
+    panel_card_x = panel_card_y = panel_card_w = panel_card_h = 0
+    panel_card_radius = 18
+    try:
+        if panel_style == "card":
+            panel_pad = max(10, int(headline_size * 0.30))
+            text_block_top = max(padding, headline_y_start - int(0.85 * headline_size))
+            text_block_bottom = max(subheadline_y_start + (len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)), cta_y + cta_height)
+            panel_card_x = max(padding, text_x - int(panel_pad * 0.8))
+            panel_card_w = min(width - 2 * padding, content_width + int(panel_pad * 1.6))
+            panel_card_y = max(padding, text_block_top - panel_pad)
+            panel_card_h = min(height - 2 * padding, (text_block_bottom - panel_card_y) + panel_pad)
+            panel_card_radius = max(12, int(min(panel_card_w, panel_card_h) * 0.04))
+    except Exception:
+        pass
+
+    # Optional badge/ribbon
+    try:
+        badge_text = (copy_data.get("badge") or v.get("badge_text") or "").strip()
+    except Exception:
+        badge_text = ""
+    badge_x = badge_y = badge_w = badge_h = 0
+    badge_color = cta_color
+    try:
+        if badge_text:
+            per_char = 10
+            badge_w = max(80, min(content_width, 30 + len(badge_text) * per_char))
+            badge_h = max(28, int(sub_size * 0.9) + 12)
+            badge_x = text_x
+            badge_y = max(12, padding)
+            # If headline starts very near top, nudge badge below padding
+            if badge_y + badge_h > (headline_y_start - int(0.8 * headline_size)):
+                badge_y = max(padding, headline_y_start - int(0.8 * headline_size) - badge_h - 8)
+    except Exception:
+        pass
+
     svg_template = """
     <svg width="{{ width }}" height="{{ height }}" viewBox="0 0 {{ width }} {{ height }}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <defs>
@@ -1080,6 +1635,11 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 <stop offset="0%" stop-color="#1f2937" stop-opacity="1" />
                 <stop offset="100%" stop-color="#111827" stop-opacity="1" />
             </linearGradient>
+            <!-- Gradient for headline text fill -->
+            <linearGradient id="headlineGrad" x1="0%" y1="0%" x2="0" y2="100%">
+                <stop offset="0%" stop-color="{{ accent_light }}" />
+                <stop offset="100%" stop-color="{{ cta_color }}" />
+            </linearGradient>
             <filter id="imgFilter" x="-50%" y="-50%" width="200%" height="200%">
                 <feComponentTransfer>
                     <feFuncR type="linear" slope="{{ img_slope }}" intercept="{{ img_intercept }}" />
@@ -1091,11 +1651,18 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
                 <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
             </filter>
+            <filter id="textGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2" result="blur" />
+                <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                </feMerge>
+            </filter>
         </defs>
 
         <!-- Background -->
         {% if original_url %}
-        <image xlink:href="{{ original_url }}" x="0" y="0" width="{{ width }}" height="{{ height }}" preserveAspectRatio="{{ preserve_mode }}" filter="url(#imgFilter)"/>
+        <image xlink:href="{{ original_url | e }}" x="0" y="0" width="{{ width }}" height="{{ height }}" preserveAspectRatio="{{ preserve_mode }}" filter="url(#imgFilter)"/>
         {% if show_scrim %}
         <!-- Optional legibility gradient overlay -->
         <rect width="100%" height="100%" fill="url(#shade)" />
@@ -1116,23 +1683,36 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             <rect x="{{ center_x }}" y="0" width="{{ text_panel_w }}" height="{{ height }}" fill="url(#shade)" />
             {% endif %}
             {% endif %}
+            
+            {% if panel_style == 'card' %}
+            <!-- Card background behind text for legibility -->
+            <rect x="{{ panel_card_x }}" y="{{ panel_card_y }}" width="{{ panel_card_w }}" height="{{ panel_card_h }}" rx="{{ panel_card_radius }}" fill="#000000" fill-opacity="0.28" />
+            {% endif %}
+
+            {% if badge_text %}
+            <!-- Optional badge/ribbon -->
+            <g filter="url(#shadow)">
+                <rect x="{{ badge_x }}" y="{{ badge_y }}" width="{{ badge_w }}" height="{{ badge_h }}" rx="8" fill="{{ badge_color }}" />
+                <text x="{{ badge_x + badge_w/2 }}" y="{{ badge_y + badge_h*0.68 }}" font-family="{{ font_family_headline }}" font-size="{{ int(sub_size*0.85) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ badge_text | e }}</text>
+            </g>
+            {% endif %}
             <!-- Headline with emphasis tspans -->
-            <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{{ text_color }}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)">
+            <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{% if headline_fill == 'gradient' %}url(#headlineGrad){% else %}{{ text_color }}{% endif %}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.25" stroke-width="{{ headline_stroke_w }}">
                 {% for line in headline_segments %}
                 <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">
                     {% for seg in line %}
-                    <tspan{% if seg.style == 'bold' %} font-weight="800"{% endif %}>{{ seg.text | e }}</tspan>
+                    <tspan{% if seg.style == 'bold' %} font-weight="800"{% elif seg.style == 'italic' %} font-style="italic"{% endif %}>{{ (seg.text | upper if seg.style == 'caps' else seg.text) | e }}</tspan>
                     {% endfor %}
                 </tspan>
                 {% endfor %}
             </text>
 
             <!-- Subheadline -->
-            <text x="{{ text_x }}" y="{{ subheadline_y_start }}" font-family="{{ font_family_body }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" filter="url(#shadow)">
+            <text x="{{ text_x }}" y="{{ subheadline_y_start }}" font-family="{{ font_family_body }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.18" stroke-width="{{ sub_stroke_w }}">
                 {% for line in sub_segments %}
                 <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">
                     {% for seg in line %}
-                    <tspan{% if seg.style == 'bold' %} font-weight="700"{% endif %}>{{ seg.text | e }}</tspan>
+                    <tspan{% if seg.style == 'bold' %} font-weight="700"{% elif seg.style == 'italic' %} font-style="italic"{% endif %}>{{ (seg.text | upper if seg.style == 'caps' else seg.text) | e }}</tspan>
                     {% endfor %}
                 </tspan>
                 {% endfor %}
@@ -1140,7 +1720,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
             <!-- CTA Button -->
             <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="{{ cta_radius }}" fill="{{ cta_fill }}" filter="url(#shadow)" stroke="{{ cta_stroke }}" stroke-opacity="{{ cta_stroke_opacity }}"/>
-            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta }}</text>
+            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta | e }}</text>
         </g>
     </svg>
     """
@@ -1156,6 +1736,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     except Exception:
         pass
     center_x = int((width - text_panel_w) / 2)
+    # Variables for enhanced styling passed to the template
     svg_content = template.render(
         width=width,
         height=height,
@@ -1174,6 +1755,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         subheadline_y_start=subheadline_y_start,
         panel_side=panel_side,
         text_x=text_x,
+        content_width=content_width,
         cta_x=cta_x,
         cta_y=cta_y,
         cta_width=cta_width,
@@ -1186,6 +1768,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         headline_weight=headline_weight,
         body_weight=body_weight,
         cta_color=cta_color,
+        accent_light=accent_light,
         text_panel_w=text_panel_w,
         original_url=img_href,
         preserve_mode=preserve_mode,
@@ -1205,6 +1788,24 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         cta_fill=cta_fill,
         cta_stroke=cta_stroke,
         cta_stroke_opacity=cta_stroke_opacity,
+        # Enhanced text styling
+        headline_fill=headline_fill,
+        headline_stroke_w=headline_stroke_w,
+        sub_stroke_w=sub_stroke_w,
+        # Panel card
+        panel_style=panel_style,
+        panel_card_x=panel_card_x,
+        panel_card_y=panel_card_y,
+        panel_card_w=panel_card_w,
+        panel_card_h=panel_card_h,
+        panel_card_radius=panel_card_radius,
+        # Badge
+        badge_text=badge_text,
+        badge_x=badge_x,
+        badge_y=badge_y,
+        badge_w=badge_w,
+        badge_h=badge_h,
+        badge_color=badge_color,
         int=int,
     )
     return svg_content
@@ -1243,6 +1844,34 @@ def _upload_bytes(bucket: str, key: str, data: bytes, content_type: str) -> Tupl
                 f.write(data)
             return f"{PUBLIC_BASE_URL}/static/{rel_path}", None
 
+def _upload_file_path(bucket: str, key: str, file_path: Path, content_type: str) -> Tuple[str, Optional[str]]:
+    """Upload a file on disk to storage, streaming from disk when possible.
+    Returns (public_url, internal_url_or_None)."""
+    rel_path = f"{bucket}/{key}"
+    if STORAGE_MODE == 'local':
+        dst = Path(STORAGE_DIR) / rel_path
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(file_path, dst)
+        return f"{PUBLIC_BASE_URL}/static/{rel_path}", None
+    else:
+        public_base = os.getenv('PUBLIC_MINIO_BASE', 'http://localhost:9000').rstrip('/')
+        internal_base = os.getenv('S3_ENDPOINT', 'http://minio:9000').rstrip('/')
+        try:
+            with open(file_path, 'rb') as fobj:
+                s3_client.put_object(
+                    Bucket=bucket,
+                    Key=key,
+                    Body=fobj,
+                    ContentType=content_type,
+                )
+            return f"{public_base}/{bucket}/{key}", f"{internal_base}/{bucket}/{key}"
+        except Exception as e:
+            logger.error(f"S3 upload failed for {bucket}/{key}: {e}. Falling back to local storage.")
+            dst = Path(STORAGE_DIR) / rel_path
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(file_path, dst)
+            return f"{PUBLIC_BASE_URL}/static/{rel_path}", None
+
 async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job_id: str) -> List[RenderOutput]:
     """Render SVG to PNG/JPG using CairoSVG and upload all formats (including original SVG), with local/S3 storage support."""
     outputs: List[RenderOutput] = []
@@ -1257,6 +1886,11 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
     svg_key = f"outputs/{job_id}_{unique}_svg.svg"
     svg_url, _ = _upload_bytes(outputs_bucket, svg_key, svg_content.encode('utf-8'), 'image/svg+xml')
     outputs.append(RenderOutput(format="svg", width=width, height=height, url=svg_url))
+
+    # Respect rasterization toggle: allow SVG-only outputs in local/non-Docker setups
+    if not RENDER_RASTER:
+        logger.info("RENDER_RASTER disabled; returning SVG-only outputs")
+        return outputs
 
     # 2) Render SVG -> PNG bytes using CairoSVG with a robust URL fetcher
     def _cairo_url_fetcher(url: str, *_, **__):
@@ -1302,10 +1936,15 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
             output_width=width,
             output_height=height,
             unsafe=True,
+            url_fetcher=_cairo_url_fetcher,
         )
         logger.info(f"Rendered PNG bytes: {len(png_bytes)}")
     except Exception as e:
         logger.warning(f"Skipping PNG/JPG rendering due to missing CairoSVG or native deps: {e}")
+
+    # No Sharp fallback; if Cairo failed, we'll proceed with SVG-only outputs
+    if not png_bytes:
+        logger.info("Cairo rendering unavailable; skipping rasterization (Sharp removed).")
 
     if png_bytes:
         # Upload PNG
@@ -1333,77 +1972,160 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
 
 # API Endpoints
 @app.post("/ingest-analyze")
-async def ingest_analyze(image: UploadFile = File(...)):
-    """Stage 1: Upload & sanitize, Stage 2: Visual analysis"""
+async def ingest_analyze(request: Request, image: UploadFile = File(...)):
+    """Stage 1: Upload & sanitize, Stage 2: Visual analysis
+    - Streams the uploaded file to disk to avoid loading entire payload in memory
+    - Enforces per-chunk timeouts and a hard size limit
+    - Ensures proper path handling for Windows and Unix systems
+    - Provides better logging and supports client cancellation
+    """
+    t0 = perf_counter()
+    tmp_path: Optional[Path] = None
     try:
-        # Read and process image
-        image_data = await image.read()
-        pil_image = Image.open(io.BytesIO(image_data))
-        
-        # Convert to RGB if needed
+        # Validate content type early
+        ctype = (image.content_type or "").lower()
+        if not ctype.startswith("image/"):
+            logger.warning(f"Rejecting non-image upload: content_type={ctype!r}")
+            raise HTTPException(status_code=415, detail="Unsupported Media Type: expected image/*")
+
+        # Stream upload to a temp file to avoid large memory usage
+        suffix = os.path.splitext(image.filename or "")[1] or ".bin"
+        # Ensure filename is clean and path is properly joined for Windows
+        safe_filename = f"{uuid.uuid4().hex}{suffix}"
+        tmp_path = (UPLOAD_DIR_TEMP / safe_filename).resolve()
+        # Ensure parent directory exists
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        max_bytes = UPLOAD_MAX_MB * 1024 * 1024
+        chunk_size = max(1, UPLOAD_CHUNK_KB) * 1024
+        total = 0
+        read_chunks = 0
+        last_log = 0
+
+        logger.info(f"ingest-analyze: start streaming upload -> {tmp_path.name} (limit={UPLOAD_MAX_MB}MB, chunk={UPLOAD_CHUNK_KB}KB)")
+        async with aiofiles.open(tmp_path, "wb") as out:
+            while True:
+                # honor client disconnects
+                if await request.is_disconnected():
+                    logger.warning("Client disconnected during upload")
+                    raise HTTPException(status_code=499, detail="Client Closed Request")
+
+                try:
+                    chunk = await asyncio.wait_for(image.read(chunk_size), timeout=UPLOAD_READ_TIMEOUT_S)
+                except asyncio.TimeoutError:
+                    logger.error("Upload read timeout per-chunk")
+                    raise HTTPException(status_code=408, detail="Upload read timeout")
+
+                if not chunk:
+                    break
+                total += len(chunk)
+                read_chunks += 1
+                if total > max_bytes:
+                    logger.warning(f"Upload exceeded limit: {total} bytes > {max_bytes} bytes")
+                    raise HTTPException(status_code=413, detail="File too large")
+                await out.write(chunk)
+
+                # throttle progress logs
+                if total - last_log >= 2 * 1024 * 1024:  # ~2MB intervals
+                    logger.info(f"ingest-analyze: streamed {total/1024/1024:.1f} MB so far...")
+                    last_log = total
+
+        if total == 0:
+            raise HTTPException(status_code=400, detail="Empty upload")
+
+        logger.info(f"ingest-analyze: finished upload size={total/1024/1024:.2f} MB, chunks={read_chunks}, elapsed={perf_counter()-t0:.2f}s")
+
+        # Open with Pillow from disk (avoid loading whole bytes in app memory early)
+        pil_image = Image.open(str(tmp_path))
         if pil_image.mode != 'RGB':
             pil_image = pil_image.convert('RGB')
-        
-        # Analyze image
-        mask, bbox = detect_foreground(pil_image)
-        palette = extract_palette(pil_image)
-        crops = generate_crop_proposals(pil_image, bbox)
-        
-        # Upload original image to storage for public composition reference
+
+        # Analyze image (CPU-bound) in a thread with timeout
+        t1 = perf_counter()
+        def _sync_analyze(img: Image.Image):
+            m, bb = detect_foreground(img)
+            pal = extract_palette(img)
+            cr = generate_crop_proposals(img, bb)
+            return m, bb, pal, cr
+        try:
+            mask, bbox, palette, crops = await asyncio.wait_for(asyncio.to_thread(_sync_analyze, pil_image), timeout=PROCESS_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.error("Image analysis timed out")
+            raise HTTPException(status_code=504, detail="Image analysis timed out")
+        logger.info(f"ingest-analyze: analysis done in {perf_counter()-t1:.2f}s (bbox={bbox}, palette_len={len(palette)}, crops={len(crops)})")
+
+        # Upload original to storage by streaming from file path
         assets_bucket = os.getenv('S3_BUCKET_ASSETS', 'assets')
-        orig_ext = os.path.splitext(image.filename)[1] or '.png'
+        orig_ext = os.path.splitext(image.filename or "")[1] or '.png'
         orig_key = f"uploads/pipeline/{uuid.uuid4().hex}{orig_ext}"
-        original_url_http, original_url_internal = _upload_bytes(
-            assets_bucket, orig_key, image_data, image.content_type or 'application/octet-stream'
-        )
-        # Prepare data URL for reliable embedding during server-side rendering
-        # Detect MIME from Pillow format for accuracy
-        fmt = (pil_image.format or '').upper()
-        fmt_to_mime = {
-            'JPEG': 'image/jpeg',
-            'JPG': 'image/jpeg',
-            'PNG': 'image/png',
-            'WEBP': 'image/webp',
-            'GIF': 'image/gif',
-            'BMP': 'image/bmp'
-        }
-        detected_mime = fmt_to_mime.get(fmt)
-        mime = detected_mime or (image.content_type if (image.content_type and image.content_type.startswith('image/')) else 'image/png')
-        b64 = base64.b64encode(image_data).decode('ascii')
-        original_data_url = f"data:{mime};base64,{b64}"
-        
-        # Save mask to S3/MinIO
+        mime_guess = None
+        try:
+            fmt = (getattr(pil_image, 'format', '') or '').upper()
+            fmt_to_mime = {
+                'JPEG': 'image/jpeg',
+                'JPG': 'image/jpeg',
+                'PNG': 'image/png',
+                'WEBP': 'image/webp',
+                'GIF': 'image/gif',
+                'BMP': 'image/bmp'
+            }
+            mime_guess = fmt_to_mime.get(fmt)
+        except Exception:
+            pass
+        content_type = mime_guess or (ctype if ctype.startswith('image/') else 'application/octet-stream')
+        original_url_http, original_url_internal = _upload_file_path(assets_bucket, orig_key, tmp_path, content_type)
+
+        # Prepare optional data URL (only for small files to avoid huge payload)
+        original_data_url = ""
+        try:
+            if total <= max(1, DATA_URL_MAX_CHARS // 4):  # base64 expansion ~4/3, rough cap
+                async with aiofiles.open(tmp_path, 'rb') as f_in:
+                    data_small = await f_in.read()
+                b64 = base64.b64encode(data_small).decode('ascii')
+                mime = content_type if content_type.startswith('image/') else 'image/png'
+                candidate = f"data:{mime};base64,{b64}"
+                if len(candidate) <= DATA_URL_MAX_CHARS:
+                    original_data_url = candidate
+        except Exception as e:
+            logger.warning(f"Skipping data URL embed due to error: {e}")
+
+        # Save mask to storage
         mask_buffer = io.BytesIO()
         mask.save(mask_buffer, format='PNG')
         mask_buffer.seek(0)
-        
         mask_key = f"masks/{uuid.uuid4().hex}_mask.png"
         bucket_name = os.getenv('S3_BUCKET_ASSETS', 'assets')
         mask_http_url, _ = _upload_bytes(bucket_name, mask_key, mask_buffer.getvalue(), 'image/png')
-        mask_url = mask_http_url
-        
+
         # Create analysis result
         analysis = ImageAnalysis(
-            mask_url=mask_url,
+            mask_url=mask_http_url,
             palette=palette,
             crops=crops,
             foreground_bbox=bbox,
-            saliency_points=[[bbox[0] + bbox[2]//2, bbox[1] + bbox[3]//2]],  # Center of foreground
+            saliency_points=[[bbox[0] + bbox[2]//2, bbox[1] + bbox[3]//2]],
             dominant_colors=palette[:3],
-            text_regions=[]  # Would use OCR in production
+            text_regions=[],
         )
-        
-        result = analysis.dict()
+        result = analysis.model_dump()
         result["original_url"] = original_url_http
         result["original_url_internal"] = original_url_internal
         result["original_data_url"] = original_data_url
-        # Provide original image size to enable correct coordinate mapping in composition
         result["original_size"] = [int(pil_image.width), int(pil_image.height)]
+        logger.info(f"ingest-analyze: success total_elapsed={perf_counter()-t0:.2f}s")
         return result
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in ingest-analyze: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Cleanup temp file
+        try:
+            if tmp_path and tmp_path.exists():
+                tmp_path.unlink(missing_ok=True)  # type: ignore[arg-type]
+        except Exception:
+            pass
 
 @app.post("/copy")
 async def copy_gen(payload: CopyInput):
@@ -1430,14 +2152,14 @@ async def copy_gen(payload: CopyInput):
         }
 
         # Deterministic fonts shared across variants for this request
-        fonts = [f.dict() for f in recommend_fonts(payload.tone, payload.platform)]
+        fonts = [f.model_dump() for f in recommend_fonts(payload.tone, payload.platform)]
 
         # Enrich each variant with emphasis ranges and font recommendations
         enriched_variants: List[Dict[str, Any]] = []
         for v in (raw_variants or [])[: max(1, int(payload.num_variants))]:
             em = compute_emphasis_ranges(v.get("headline", ""), v.get("subheadline", ""))
             enriched = dict(v)
-            enriched["emphasis_ranges"] = {k: [r.dict() for r in vlist] for k, vlist in em.items()}
+            enriched["emphasis_ranges"] = {k: [r.model_dump() for r in vlist] for k, vlist in em.items()}
             enriched["font_recommendations"] = fonts
             enriched_variants.append(enriched)
 
@@ -1446,7 +2168,7 @@ async def copy_gen(payload: CopyInput):
             enriched_variants = [
                 {
                     **best_fallback,
-                    "emphasis_ranges": {k: [r.dict() for r in vlist] for k, vlist in em.items()},
+                    "emphasis_ranges": {k: [r.model_dump() for r in vlist] for k, vlist in em.items()},
                     "font_recommendations": fonts,
                 }
             ]
@@ -1492,6 +2214,15 @@ async def compose(payload: Dict[str, Any]):
                 variant["seed"] = int(vseed)
             except Exception:
                 pass
+        # Optionally ask GPT for layout overrides (cached) and merge them
+        gpt_variant: Dict[str, Any] = {}
+        if USE_GPT_LAYOUT:
+            try:
+                gpt_variant = await get_gpt_layout_variant_cached(copy_data, analysis, crop_info, base_variant=variant)
+            except Exception as _e:
+                logger.warning(f"GPT layout generation skipped in /compose: {_e}")
+        if gpt_variant:
+            variant = {**variant, **gpt_variant}
         svg_content = create_svg_composition(
             copy_data,
             analysis,
@@ -1515,7 +2246,7 @@ async def compose(payload: Dict[str, Any]):
             }
         )
         
-        return result.dict()
+        return result.model_dump()
         
     except Exception as e:
         logger.error(f"Error in composition: {e}")
@@ -1565,6 +2296,15 @@ async def compose_variants(payload: Dict[str, Any]):
             if "panel_side" not in v:
                 v.setdefault("flip_panel", bool(i % 2))
 
+            # Optionally enrich each variant with GPT layout overrides (cached)
+            if USE_GPT_LAYOUT:
+                try:
+                    gpt_v = await get_gpt_layout_variant_cached(copy_data, analysis, crop_info, base_variant=v)
+                    if gpt_v:
+                        v.update(gpt_v)
+                except Exception as _e:
+                    logger.warning(f"GPT layout skipped for variant {i}: {_e}")
+
             svg = create_svg_composition(
                 copy_data,
                 analysis,
@@ -1609,7 +2349,7 @@ async def render(payload: Dict[str, Any]):
             thumbnail_url=thumbnail_url
         )
         
-        return result.dict()
+        return result.model_dump()
         
     except Exception as e:
         logger.error(f"Error in rendering: {e}")
@@ -1619,22 +2359,29 @@ async def render(payload: Dict[str, Any]):
 async def qa(payload: Dict[str, Any]):
     """Stage 6: Quality assurance gates"""
     try:
+        # Normalize payload and sub-objects to avoid NoneType errors
+        payload = payload or {}
+
         # Basic QA checks
-        composition = payload.get("composition", {})
-        render_output = payload.get("render", {})
+        composition = payload.get("composition") or {}
+        render_output = payload.get("render") or {}
         
         # Check if SVG is valid
-        svg_content = composition.get("svg", "")
+        svg_content = (composition.get("svg") if isinstance(composition, dict) else "") or ""
         if not svg_content or "<svg" not in svg_content:
             return {"ok": False, "error": "Invalid SVG content"}
         
-        # Check if render outputs exist
-        outputs = render_output.get("outputs", [])
+        # Check if render outputs exist (support either dict with outputs or direct list)
+        outputs: List[Any] = []
+        if isinstance(render_output, dict):
+            outputs = render_output.get("outputs") or []
+        elif isinstance(render_output, list):
+            outputs = render_output
         if not outputs:
             return {"ok": False, "error": "No render outputs"}
         
         # Check text length constraints and basic layout heuristics
-        copy_data = payload.get("copy", {})
+        copy_data = payload.get("copy") or {}
         if copy_data.get("headline", "") and len(copy_data["headline"]) > 80:
             return {"ok": False, "error": "Headline too long"}
         if copy_data.get("subheadline", "") and len(copy_data["subheadline"]) > 160:
@@ -1660,8 +2407,13 @@ async def qa(payload: Dict[str, Any]):
 async def export(payload: Dict[str, Any]):
     """Stage 7: Export & delivery"""
     try:
-        render_output = payload.get("render", {})
-        outputs = render_output.get("outputs", [])
+        payload = payload or {}
+        render_output = payload.get("render") or {}
+        outputs: List[Any] = []
+        if isinstance(render_output, dict):
+            outputs = render_output.get("outputs") or []
+        elif isinstance(render_output, list):
+            outputs = render_output
         
         # Create manifest
         manifest = {
@@ -1698,7 +2450,16 @@ async def export(payload: Dict[str, Any]):
 @app.get("/health")
 async def health():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "madworks-ai-pipeline"}
+    return {
+        "status": "healthy",
+        "service": "madworks-ai-pipeline",
+        "gpt_layout_enabled": bool(USE_GPT_LAYOUT),
+        "layout_model": LAYOUT_MODEL,
+        "layout_temperature": LAYOUT_TEMPERATURE,
+        "openai_configured": bool(_OPENAI_API_KEY),
+        "raster_enabled": bool(RENDER_RASTER),
+  }
+ 
 
 if __name__ == "__main__":
     import uvicorn

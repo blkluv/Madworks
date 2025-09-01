@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsup src/index.ts --format esm --out-dir dist",
+    "serve": "tsx watch src/server.ts",
+    "build": "tsup src/index.ts src/server.ts --format esm --out-dir dist",
     "start": "node dist/index.js"
   },
   "dependencies": {
@@ -15,7 +16,8 @@
     "pg": "^8.11.5",
     "pino": "^9.3.2",
     "undici": "^6.19.8",
-    "form-data": "^4.0.0"
+    "form-data": "^4.0.0",
+    "sharp": "^0.33.4"
   },
   "devDependencies": {
     "@types/node": "^22.7.8",

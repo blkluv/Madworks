@@ -35,7 +35,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
   return (
     <div className="sticky top-0 z-50">
       <div className="w-full px-4 py-4">
-        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-4">
+        <div className="flex items-center justify-between">
           <div
             role="button"
             onClick={() => goto("home")}
@@ -58,8 +58,8 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             </div>
           </div>
 
-          <div className="justify-self-center">
-            <nav className="flex justify-center">
+          <div className="flex-1 flex justify-center">
+            <nav className="flex">
               <div className="flex items-center gap-2">
                 <Button
                   data-nav="home"

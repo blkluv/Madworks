@@ -11,14 +11,15 @@ import { NextResponse } from "next/server";
 // - image (optional File)
 // Also accepts JSON body with the same fields (no image in that case).
 
-export const runtime = "edge";
+export const runtime = "nodejs";
+export const maxDuration = 300; // allow up to 5 minutes when deployed to platforms that honor this setting
 
 const PIPELINE_URL = process.env.NEXT_PUBLIC_PIPELINE_URL || process.env.PIPELINE_URL || "http://localhost:8010";
 
 const TIMEOUTS = {
   ingestAnalyze: 45_000,
   copy: 90_000,
-  compose: 30_000,
+  compose: 60_000,
   render: 120_000,
   qa: 30_000,
   export: 30_000,

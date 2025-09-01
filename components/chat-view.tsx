@@ -29,6 +29,32 @@ const uid = () => {
   return `id_${Date.now()}_${Math.random().toString(36).slice(2)}`
 }
 
+// Convert an SVG URL to a data URL so it always displays in <img>, avoiding
+// any server-side content-type or cross-origin quirks during local dev.
+async function toDisplayUrl(o: { url: string; format?: string }): Promise<string> {
+  try {
+    const u = o?.url || ""
+    const fmt = (o?.format || "").toLowerCase()
+    if (!u) return u
+    if (u.startsWith("data:")) return u
+    const isSvg = fmt === "svg" || u.toLowerCase().endsWith(".svg")
+    if (!isSvg) return u
+    const res = await fetch(u, { cache: "no-store" })
+    const ct = res.headers?.get?.("content-type") || ""
+    if (!res.ok) {
+      console.warn("toDisplayUrl: fetch failed", { url: u, status: res.status, ct })
+      return u
+    }
+    const text = await res.text()
+    const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`
+    console.debug("toDisplayUrl: embedded SVG", { url: u, ct, length: text.length })
+    return encoded
+  } catch (err) {
+    console.error("toDisplayUrl error", err, { url: o?.url, format: o?.format })
+    return o?.url
+  }
+}
+
 // Prefer a single best format per size/variant to avoid duplicates in the collage
 function dedupePreferredImages(
   outs: Array<{ format: string; width: number; height: number; url: string; variant?: string; label?: string; size?: string }> = []
@@ -100,13 +126,15 @@ function normalizeUrl(u: string): string {
     if (/%[0-9A-Fa-f]{2}/.test(v)) {
       try { v = decodeURIComponent(v) } catch {}
     }
-    // If already absolute after decoding, return as-is
-    if (v.startsWith("http://") || v.startsWith("https://")) return v
+    // If already absolute or data/blob URL after decoding, return as-is
+    if (v.startsWith("http://") || v.startsWith("https://") || v.startsWith("data:") || v.startsWith("blob:")) return v
 
     // Otherwise prefix with pipeline base
     const base = (process.env.NEXT_PUBLIC_PIPELINE_BASE || process.env.NEXT_PUBLIC_PIPELINE_URL || "http://localhost:8010").replace(/\/$/, "")
     const path = v.startsWith("/") ? v : `/${v}`
-    return `${base}${path}`
+    const abs = `${base}${path}`
+    console.debug("normalizeUrl", { input: u, decoded: v, base, abs })
+    return abs
   } catch {
     return u
   }
@@ -328,12 +356,28 @@ export function ChatView() {
 
     setBusy(true)
     try {
+      // If an image is attached, upload it directly to the pipeline to avoid large payloads through Next.js
+      let analysisForSend: any = null
+      if (imageFile) {
+        const ingestForm = new FormData()
+        ingestForm.append("image", imageFile, imageFile.name || "upload.png")
+        const pipelineUrl = (process.env.NEXT_PUBLIC_PIPELINE_URL || process.env.NEXT_PUBLIC_PIPELINE_BASE || "http://localhost:8010").replace(/\/$/, "")
+        const ingestRes = await fetch(`${pipelineUrl}/ingest-analyze`, { method: "POST", body: ingestForm })
+        if (!ingestRes.ok) {
+          const t = await ingestRes.text().catch(() => "")
+          throw new Error(`Ingest failed HTTP ${ingestRes.status}: ${t}`)
+        }
+        analysisForSend = await ingestRes.json()
+        // Persist analysis to the conversation for reuse in follow-ups
+        updateActive((c) => ({ ...c, analysis: analysisForSend }))
+      } else if (activeConv?.analysis) {
+        analysisForSend = activeConv.analysis
+      }
+
       const form = new FormData()
       form.append("prompt", input || "")
-      if (imageFile) form.append("image", imageFile, imageFile.name || "upload.png")
-      // Reuse previous analysis if no new image provided
-      if (!imageFile && activeConv?.analysis) {
-        try { form.append("analysis", JSON.stringify(activeConv.analysis)) } catch {}
+      if (analysisForSend) {
+        try { form.append("analysis", JSON.stringify(analysisForSend)) } catch {}
       }
       // Always forward conversation history for better context when composing
       try {
@@ -381,11 +425,15 @@ export function ChatView() {
 
       // Build deduped image attachments per message to preserve history
       const deduped = dedupePreferredImages(json.outputs || [])
-      let attachments: Array<{ type: "image"; url: string; variant?: string }> = deduped.map((o: any) => ({
-        type: "image",
-        url: o.url,
-        variant: [o.variant, o.size].filter(Boolean).join(" ") || undefined,
-      }))
+      // Ensure SVGs are embedded as data URLs so they always render in <img>
+      const attProcessed = await Promise.all(
+        deduped.map(async (o: any) => ({
+          type: "image" as const,
+          url: await toDisplayUrl(o),
+          variant: [o.variant, o.size].filter(Boolean).join(" ") || undefined,
+        }))
+      )
+      let attachments: Array<{ type: "image"; url: string; variant?: string }> = attProcessed
       // Fallback: if no raster/SVG outputs were uploaded, embed the composed SVG directly if available
       if (attachments.length === 0 && json?.composition?.svg) {
         try {
@@ -394,6 +442,19 @@ export function ChatView() {
           attachments = [{ type: 'image', url: dataUrl }]
         } catch {}
       }
+
+      // Ensure the original uploaded image is included as an attachment if missing
+      try {
+        const usedAnalysis = (json && json.analysis) ? json.analysis : (analysisForSend || activeConv.analysis)
+        const originalRaw = usedAnalysis?.original_url_internal || usedAnalysis?.original_url || usedAnalysis?.original_data_url
+        if (originalRaw) {
+          const origHref = normalizeUrl(originalRaw)
+          const hasOrig = attachments.some((a) => normalizeUrl((a as any).url) === origHref)
+          if (!hasOrig) {
+            attachments.unshift({ type: 'image', url: origHref, variant: 'original' })
+          }
+        }
+      } catch {}
 
       const assistantMsg: Message = {
         id: uid(),
@@ -406,7 +467,7 @@ export function ChatView() {
       updateActive((c) => ({
         ...c,
         messages: [...c.messages, assistantMsg],
-        analysis: json.analysis ? json.analysis : c.analysis,
+        analysis: json.analysis ? json.analysis : (c.analysis || analysisForSend || null),
       }))
 
       // Auto-name the conversation after the first successful AI response
@@ -521,15 +582,25 @@ export function ChatView() {
     if (autoRanRef.current) return
     const hasPending = !!pendingPrompt || (pendingFiles && pendingFiles.length > 0)
     if (!hasPending) return
+
     autoRanRef.current = true
-    
     const firstFile = pendingFiles?.[0] || null
-    setInput(pendingPrompt || "")
     setImageFile(firstFile)
-    // allow state to commit before sending
-    await new Promise((r) => setTimeout(r, 0))
-    await handleSendMessage(new Event('submit') as any)
-    // clear pending
+    
+    // Set the input to the pending prompt
+    if (pendingPrompt) {
+      setInput(pendingPrompt)
+    }
+    
+    // Allow state to update before sending
+    await new Promise((r) => setTimeout(r, 100))
+    
+    // Only send if we have both an image and a prompt
+    if (firstFile && pendingPrompt) {
+      await handleSendMessage(new Event('submit') as any)
+    }
+    
+    // Clear pending state
     setPendingPrompt("")
     setPendingFiles([])
   }, [pendingPrompt, pendingFiles, setPendingPrompt, setPendingFiles, handleSendMessage])
@@ -588,7 +659,7 @@ export function ChatView() {
       {/* Right: Chat */}
       <section className="flex-1 min-h-0 flex flex-col">
         {/* Messages & Collage */}
-        <div className="flex-1 min-h-0 overflow-y-auto chat-scrollbar w-full">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain chat-scrollbar w-full">
           <div className="mx-auto max-w-3xl px-4 md:px-6 lg:px-8 py-8 pb-36 space-y-8">
             {activeConv.messages.length === 0 && (
               <div className="w-full">
@@ -630,7 +701,19 @@ export function ChatView() {
                         {m.attachments.map((a, i) => (
                           <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={a.url} alt="attachment" className="rounded-md border border-zinc-900/60 max-h-48 object-contain" />
+                            <img
+                              src={a.url}
+                              alt="attachment"
+                              className="rounded-md border border-zinc-900/60 max-h-48 object-contain"
+                              onLoad={(e) => {
+                                const img = e.currentTarget
+                                console.info("img loaded (user)", { src: img.currentSrc || img.src, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight })
+                              }}
+                              onError={(e) => {
+                                const img = e.currentTarget
+                                console.error("img failed (user)", { src: img.src })
+                              }}
+                            />
                           </a>
                         ))}
                       </div>
@@ -652,7 +735,19 @@ export function ChatView() {
                           <a key={i} href={(a as any).url} target="_blank" rel="noreferrer" className="relative block group isolate">
                             <span className="pointer-events-none absolute -inset-[2px] rounded-md bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></span>
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={(a as any).url} alt={`output ${i+1}`} className="relative z-10 rounded-md border border-zinc-900/60 bg-zinc-900/40 aspect-square object-contain group-hover:border-zinc-800" />
+                            <img
+                              src={(a as any).url}
+                              alt={`output ${i+1}`}
+                              className="relative z-10 rounded-md border border-zinc-900/60 bg-zinc-900/40 aspect-square object-contain group-hover:border-zinc-800"
+                              onLoad={(e) => {
+                                const img = e.currentTarget
+                                console.info("img loaded (assistant)", { src: img.currentSrc || img.src, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight })
+                              }}
+                              onError={(e) => {
+                                const img = e.currentTarget
+                                console.error("img failed (assistant)", { src: img.src })
+                              }}
+                            />
                           </a>
                         ))}
                       </div>
@@ -685,7 +780,7 @@ export function ChatView() {
         </div>
 
         {/* Composer */}
-        <div className="sticky bottom-0 z-10 p-4 bg-transparent shrink-0" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+        <div className="sticky bottom-0 z-10 p-4 pb-[env(safe-area-inset-bottom)] bg-transparent shrink-0" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
           <div className="w-full max-w-3xl mx-auto">
             <div className="mb-2 flex justify-end">
               <CreditsPill variant="inline" />

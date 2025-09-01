@@ -16,17 +16,25 @@ export function HomeChatBox() {
     setFiles(imgs)
   }
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (files.length === 0) {
       fileInputRef.current?.click()
       return
     }
+    
+    // Set pending data first
     setPendingFiles(files)
     setPendingPrompt(prompt)
-    // Seamlessly navigate to Chat view where the pending data will auto-run
+    
+    // Seamlessly navigate to Chat view
     window.scrollTo({ top: 0, behavior: "smooth" })
+    
+    // Find and click the chat tab
     const chatTab = document.querySelector('[data-nav="chat"]') as HTMLElement | null
-    chatTab?.click()
+    if (chatTab) {
+      // Trigger click to switch to chat view
+      chatTab.click()
+    }
   }
 
   return (

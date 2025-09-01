@@ -9,7 +9,8 @@ export async function buildServer() {
   const server = Fastify({ logger: true });
   await server.register(fastifyCors, { origin: true });
   await server.register(fastifySensible);
-  await server.register(multipart, { limits: { fileSize: 25 * 1024 * 1024 } });
+  const uploadLimitMb = Number(process.env.UPLOAD_LIMIT_MB || 50);
+  await server.register(multipart, { limits: { fileSize: uploadLimitMb * 1024 * 1024 } });
 
   server.get('/health', async () => ({ ok: true }));
 

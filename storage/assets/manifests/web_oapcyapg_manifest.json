@@ -1,0 +1,82 @@
+{
+  "job_id": "web_oapcyapg",
+  "timestamp": "2025-09-01T14:32:38.745Z",
+  "outputs": [
+    {
+      "format": "svg",
+      "width": 1080,
+      "height": 1080,
+      "url": "http://localhost:8010/static/outputs/outputs/web_oapcyapg_ab90acdb_svg.svg",
+      "variant": "v1-left",
+      "size": "1:1"
+    },
+    {
+      "format": "svg",
+      "width": 1080,
+      "height": 1080,
+      "url": "http://localhost:8010/static/outputs/outputs/web_oapcyapg_e0a7eace_svg.svg",
+      "variant": "v1-right",
+      "size": "1:1"
+    },
+    {
+      "format": "svg",
+      "width": 1080,
+      "height": 1080,
+      "url": "http://localhost:8010/static/outputs/outputs/web_oapcyapg_dd7ad006_svg.svg",
+      "variant": "v1-center",
+      "size": "1:1"
+    },
+    {
+      "format": "svg",
+      "width": 1080,
+      "height": 1080,
+      "url": "http://localhost:8010/static/outputs/outputs/web_oapcyapg_d34000ec_svg.svg",
+      "variant": "v2-left",
+      "size": "1:1"
+    },
+    {
+      "format": "svg",
+      "width": 1080,
+      "height": 1080,
+      "url": "http://localhost:8010/static/outputs/outputs/web_oapcyapg_f69888f9_svg.svg",
+      "variant": "v2-right",
+      "size": "1:1"
+    },
+    {
+      "format": "svg",
+      "width": 1080,
+      "height": 1080,
+      "url": "http://localhost:8010/static/outputs/outputs/web_oapcyapg_d64202a5_svg.svg",
+      "variant": "v2-center",
+      "size": "1:1"
+    },
+    {
+      "format": "svg",
+      "width": 1080,
+      "height": 1080,
+      "url": "http://localhost:8010/static/outputs/outputs/web_oapcyapg_1ae42191_svg.svg",
+      "variant": "v3-left",
+      "size": "1:1"
+    },
+    {
+      "format": "svg",
+      "width": 1080,
+      "height": 1080,
+      "url": "http://localhost:8010/static/outputs/outputs/web_oapcyapg_3af61eec_svg.svg",
+      "variant": "v3-right",
+      "size": "1:1"
+    },
+    {
+      "format": "svg",
+      "width": 1080,
+      "height": 1080,
+      "url": "http://localhost:8010/static/outputs/outputs/web_oapcyapg_c32d541d_svg.svg",
+      "variant": "v3-center",
+      "size": "1:1"
+    }
+  ],
+  "metadata": {
+    "version": "1.0",
+    "pipeline": "madworks-ai"
+  }
+}

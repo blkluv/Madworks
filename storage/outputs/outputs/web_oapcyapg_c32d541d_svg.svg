@@ -1,0 +1,128 @@
+
+    <svg width="1080" height="1080" viewBox="0 0 1080 1080" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+        <defs>
+            <linearGradient id="shade" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#000000" stop-opacity="0.33599999999999997" />
+                <stop offset="50%" stop-color="#000000" stop-opacity="0.192" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="0.0768" />
+            </linearGradient>
+            <linearGradient id="shadeLeft" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#000000" stop-opacity="0.46559999999999996" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
+            </linearGradient>
+            <linearGradient id="shadeRight" x1="100%" y1="0%" x2="0%" y2="0%">
+                <stop offset="0%" stop-color="#000000" stop-opacity="0.46559999999999996" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
+            </linearGradient>
+            <linearGradient id="bg" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#1f2937" stop-opacity="1" />
+                <stop offset="100%" stop-color="#111827" stop-opacity="1" />
+            </linearGradient>
+            <!-- Gradient for headline text fill -->
+            <linearGradient id="headlineGrad" x1="0%" y1="0%" x2="0" y2="100%">
+                <stop offset="0%" stop-color="#f7c75b" />
+                <stop offset="100%" stop-color="#f4aa04" />
+            </linearGradient>
+            <filter id="imgFilter" x="-50%" y="-50%" width="200%" height="200%">
+                <feComponentTransfer>
+                    <feFuncR type="linear" slope="1.083940307041264" intercept="-0.007020587774301695" />
+                    <feFuncG type="linear" slope="1.083940307041264" intercept="-0.007020587774301695" />
+                    <feFuncB type="linear" slope="1.083940307041264" intercept="-0.007020587774301695" />
+                </feComponentTransfer>
+                <feColorMatrix type="saturate" values="1.015149540771724" />
+            </filter>
+            <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+                <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
+            </filter>
+            <filter id="textGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2" result="blur" />
+                <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                </feMerge>
+            </filter>
+        </defs>
+
+        <!-- Background -->
+        
+        <image xlink:href="http://localhost:8010/static/assets/uploads/pipeline/415993be9d1544a0b0802b5301e8a59f.jpg" x="0" y="0" width="1080" height="1080" preserveAspectRatio="xMidYMid slice" filter="url(#imgFilter)"/>
+        
+        
+
+        <!-- Content -->
+        <g>
+            
+            
+            
+
+            
+            <!-- Headline with emphasis tspans -->
+            <text x="283" y="157" font-family="Inter, Inter, Roboto, Arial, sans-serif" font-size="81" font-weight="800" fill="url(#headlineGrad)" letter-spacing="-0.33" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.25" stroke-width="3">
+                
+                <tspan x="283" dy="0">
+                    
+                    <tspan font-weight="800">Stay</tspan>
+                    
+                </tspan>
+                
+                <tspan x="283" dy="104">
+                    
+                    <tspan font-weight="800">Hydrated</tspan>
+                    
+                </tspan>
+                
+                <tspan x="283" dy="104">
+                    
+                    <tspan>with Our</tspan>
+                    
+                </tspan>
+                
+                <tspan x="283" dy="104">
+                    
+                    <tspan>Yellow</tspan>
+                    
+                </tspan>
+                
+                <tspan x="283" dy="104">
+                    
+                    <tspan>Water</tspan>
+                    
+                </tspan>
+                
+                <tspan x="283" dy="104">
+                    
+                    <tspan>Bottle</tspan>
+                    
+                </tspan>
+                
+            </text>
+
+            <!-- Subheadline -->
+            <text x="283" y="794" font-family="Inter, Inter, Roboto, Arial, sans-serif" font-size="24" font-weight="500" fill="#e5e5e5" letter-spacing="0.26" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.18" stroke-width="1">
+                
+                <tspan x="283" dy="0">
+                    
+                    <tspan>Sleek design, durable material, and</tspan>
+                    
+                </tspan>
+                
+                <tspan x="283" dy="30">
+                    
+                    <tspan>vibrant yellow color for your active</tspan>
+                    
+                </tspan>
+                
+                <tspan x="283" dy="30">
+                    
+                    <tspan>lifestyle.</tspan>
+                    
+                </tspan>
+                
+            </text>
+
+            <!-- CTA Button -->
+            <rect x="439" y="892" width="200" height="59" rx="10" fill="#f4aa04" filter="url(#shadow)" stroke="#ffffff" stroke-opacity="0.12"/>
+            <text x="539" y="930" font-family="Inter, Inter, Roboto, Arial, sans-serif" font-size="21" font-weight="800" fill="#ffffff" text-anchor="middle">Shop Now</text>
+        </g>
+    </svg>
+    
