@@ -1,0 +1,71 @@
+import { NextResponse } from "next/server";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+// Very small image proxy to avoid mixed-content/CORS issues in the browser.
+// Usage: /api/proxy?u=<absolute-url>
+// - Returns upstream bytes with the same content-type.
+// - No caching by default to ensure instant refresh during dev.
+// - Optional host restriction via PIPELINE_URL_ALLOW_HOST (comma-separated) to reduce SSRF risk.
+
+const ALLOW_HOSTS = (process.env.PIPELINE_URL_ALLOW_HOST || process.env.NEXT_PUBLIC_PIPELINE_URL || "http://localhost:8010")
+  .split(/[,\s]+/)
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function allowed(url: URL) {
+  if (ALLOW_HOSTS.length === 0) return true;
+  return ALLOW_HOSTS.some((base) => {
+    try {
+      const b = new URL(base);
+      return b.hostname === url.hostname && (!b.port || b.port === url.port || (b.port === "" && (url.port === "80" || url.port === "443")));
+    } catch {
+      return false;
+    }
+  });
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const raw = searchParams.get("u") || "";
+    if (!raw) return NextResponse.json({ error: "missing param u" }, { status: 400 });
+
+    let target: URL;
+    try {
+      target = new URL(raw);
+    } catch {
+      return NextResponse.json({ error: "u must be absolute URL" }, { status: 400 });
+    }
+
+    if (!allowed(target)) {
+      return NextResponse.json({ error: "host not allowed" }, { status: 403 });
+    }
+
+    const upstream = await fetch(target.toString(), { cache: "no-store" });
+    const ct = upstream.headers.get("content-type") || "application/octet-stream";
+    const sc = upstream.status;
+    if (!upstream.ok) {
+      const text = await upstream.text().catch(() => "");
+      return new NextResponse(text, { status: sc, headers: { "content-type": ct } });
+    }
+
+    const body = upstream.body;
+    if (!body) {
+      return new NextResponse(null, { status: sc, headers: { "content-type": ct } });
+    }
+
+    const res = new NextResponse(body, {
+      status: sc,
+      headers: {
+        "content-type": ct,
+        "cache-control": "no-store, max-age=0",
+        "access-control-allow-origin": "*",
+      },
+    });
+    return res;
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message || "proxy error" }, { status: 500 });
+  }
+}

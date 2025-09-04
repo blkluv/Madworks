@@ -137,7 +137,7 @@ export async function POST(req: Request) {
       prompt = String(form.get("prompt") || "");
       tone = form.get("tone") ? String(form.get("tone")) : undefined;
       platform = form.get("platform") ? String(form.get("platform")) : undefined;
-      num_variants = form.get("num_variants") ? Number(form.get("num_variants")) : 1;
+      num_variants = 1; // Force single variant to generate exactly one output
       temperature = form.get("temperature") ? Number(form.get("temperature")) : 0.7;
       crop_width = form.get("crop_width") ? Number(form.get("crop_width")) : 1080;
       crop_height = form.get("crop_height") ? Number(form.get("crop_height")) : 1080;
@@ -195,14 +195,14 @@ export async function POST(req: Request) {
       prompt = String(json.prompt || "");
       tone = json.tone;
       platform = json.platform;
-      num_variants = json.num_variants ?? 1;
+      num_variants = 1; // Force single variant to generate exactly one output
       temperature = json.temperature ?? 0.7;
       crop_width = json.crop_width ?? 1080;
       crop_height = json.crop_height ?? 1080;
       if (typeof json.text_color_override === "string" && json.text_color_override.trim()) {
         text_color_override = json.text_color_override.trim();
       }
-      if (typeof json.panel_side === "string" && (json.panel_side === "left" || json.panel_side === "right")) {
+      if (typeof json.panel_side === "string" && (json.panel_side === "left" || json.panel_side === "right" || json.panel_side === "center")) {
         panel_side = json.panel_side;
       }
       if (json.variant && typeof json.variant === "object") {
@@ -288,16 +288,14 @@ export async function POST(req: Request) {
   // Step 3 + 4: Compose and Render for multiple aspect ratios
   const defaultSizes = [
     { name: "square", width: 1080, height: 1080 },
-    { name: "portrait", width: 1080, height: 1350 },
-    { name: "landscape", width: 1920, height: 1080 },
-    { name: "story", width: 1080, height: 1920 },
   ];
-  const sizesToUse = (sizes && sizes.length ? sizes : defaultSizes) as Array<{ name?: string; width: number; height: number }>;
+  // Ignore provided sizes to ensure only one output is generated
+  const sizesToUse = defaultSizes as Array<{ name?: string; width: number; height: number }>;
   const combinedOutputs: any[] = []
   let combinedThumb: string | undefined = undefined
   try {
     const copyVariants = (Array.isArray(copy?.variants) && copy.variants.length
-      ? copy.variants
+      ? copy.variants.slice(0, 1) // Use only the first variant
       : [copy?.headline
           ? { headline: copy.headline, subheadline: copy.subheadline, cta: copy.cta, emphasis_ranges: copy?.emphasis_ranges, font_recommendations: copy?.font_recommendations }
           : { headline: "", subheadline: "", cta: "Learn More" }]);
@@ -306,8 +304,8 @@ export async function POST(req: Request) {
       const v = copyVariants[vi];
       const vLabel = `v${vi + 1}`;
       for (const s of sizesToUse) {
-        // Decide which sides to render: honor explicit panel_side when provided, else render all three
-        const sidesToUse = panel_side ? [panel_side] : ["left", "right", "center"];
+        // Decide which sides to render: honor explicit panel_side when provided; otherwise use only center
+        const sidesToUse = panel_side ? [panel_side] : ["center"];
 
         // Build a deterministic base variant per (job_id, variant, size)
         const seedStr = `${job_id}|${vLabel}|${s.name}|${s.width}x${s.height}`;
@@ -356,7 +354,19 @@ export async function POST(req: Request) {
 
           const t3 = Date.now();
           logStep(logs, `render_${s.name}_${sideLabel}`, "start", `Rendering ${s.width}x${s.height} for ${sideLabel}`);
-          const renderPayload = { composition: comp, crop_info: { width: s.width, height: s.height }, job_id };
+          const renderPayload = {
+            composition: comp,
+            crop_info: { width: s.width, height: s.height },
+            job_id,
+            // Force SVG rasterization so the original uploaded image in the SVG is used as the background
+            force_svg: true,
+            // Also pass analysis for completeness; backend may use it for future logic
+            analysis: analysis || {},
+            // Explicitly disable GPT image generation for this request
+            use_gpt_image: false,
+            // Provide copy context in case QA or future hooks need it
+            copy: v,
+          };
           const r = await fetchJson(
             `${PIPELINE_URL}/render`,
             {
@@ -368,7 +378,9 @@ export async function POST(req: Request) {
           );
           // Tag outputs with copy variant, side, and size for client-side use
           const outs = (r?.outputs || []).map((o: any) => ({ ...o, variant: sideLabel, size: s.name }));
-          combinedOutputs.push(...outs);
+          if (outs.length > 0) {
+            combinedOutputs.push(outs[0]);
+          }
           if (!combinedThumb) combinedThumb = r?.thumbnail_url;
           logStep(logs, `render_${s.name}_${sideLabel}`, "ok", "Rendered outputs", { outputs: outs.length }, Date.now() - t3);
         }

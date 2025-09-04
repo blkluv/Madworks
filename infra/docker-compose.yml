@@ -9,7 +9,10 @@ services:
       - USE_GPT_LAYOUT=true
       - LAYOUT_MODEL=gpt-5
       - LAYOUT_TEMPERATURE=0.6
-      - RENDER_RASTER=false
+      - RENDER_RASTER=true
+      - USE_GPT_IMAGE=false
+      - IMAGE_MODEL=gpt-5
+      - STRICT_IMAGE_MODEL_ONLY=true
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - STORAGE_MODE=local
       - S3_BUCKET_OUTPUTS=outputs

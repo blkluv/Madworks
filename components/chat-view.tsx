@@ -33,17 +33,23 @@ const uid = () => {
 // any server-side content-type or cross-origin quirks during local dev.
 async function toDisplayUrl(o: { url: string; format?: string }): Promise<string> {
   try {
-    const u = o?.url || ""
+    let u = o?.url || ""
     const fmt = (o?.format || "").toLowerCase()
     if (!u) return u
     if (u.startsWith("data:")) return u
     const isSvg = fmt === "svg" || u.toLowerCase().endsWith(".svg")
     if (!isSvg) return u
+    // If we're on https and the URL is http, proxy to avoid mixed-content blocking
+    try {
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:' && /^http:\/\//i.test(u)) {
+        u = `/api/proxy?u=${encodeURIComponent(u)}&t=${Date.now()}`
+      }
+    } catch {}
     const res = await fetch(u, { cache: "no-store" })
     const ct = res.headers?.get?.("content-type") || ""
     if (!res.ok) {
       console.warn("toDisplayUrl: fetch failed", { url: u, status: res.status, ct })
-      return u
+      return o?.url
     }
     const text = await res.text()
     const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`
@@ -70,7 +76,8 @@ function dedupePreferredImages(
       bestByKey.set(key, o)
     }
   }
-  return Array.from(bestByKey.values()).map((o) => ({ ...o, url: normalizeUrl(o.url) }))
+  // Do not normalize here; finalize per-attachment later to apply proxy and cache-busting appropriately
+  return Array.from(bestByKey.values())
 }
 
 // Derive a human-friendly title for the conversation from AI response
@@ -138,6 +145,56 @@ function normalizeUrl(u: string): string {
   } catch {
     return u
   }
+}
+
+// Append a cache-busting param to force refresh in the browser
+function addCacheBust(u: string): string {
+  try {
+    if (!u || u.startsWith('data:')) return u
+    const hasQ = u.includes('?')
+    const sep = hasQ ? '&' : '?'
+    return `${u}${sep}cb=${Date.now()}`
+  } catch {
+    return u
+  }
+}
+
+// Detect if we need to proxy to avoid mixed-content (https page loading http image)
+function needsProxy(u: string): boolean {
+  try {
+    if (typeof window === 'undefined') return false
+    return window.location.protocol === 'https:' && /^http:\/\//i.test(u)
+  } catch { return false }
+}
+
+function toProxy(u: string): string {
+  return `/api/proxy?u=${encodeURIComponent(u)}&t=${Date.now()}`
+}
+
+function finalizeUrl(u: string): string {
+  try {
+    const abs = normalizeUrl(u)
+    if (!abs || abs.startsWith('data:')) return abs
+    return needsProxy(abs) ? toProxy(abs) : addCacheBust(abs)
+  } catch {
+    return u
+  }
+}
+
+function canonical(u: string): string {
+  try {
+    // Strip proxy wrapper and cache-busting for equality checks
+    let raw = u
+    if (raw.startsWith('/api/proxy')) {
+      const qs = raw.split('?')[1] || ''
+      const sp = new URLSearchParams(qs)
+      raw = sp.get('u') || raw
+    }
+    const url = new URL(raw)
+    url.searchParams.delete('cb')
+    url.searchParams.delete('t')
+    return `${url.origin}${url.pathname}`
+  } catch { return u }
 }
 
 export function ChatView() {
@@ -425,15 +482,35 @@ export function ChatView() {
 
       // Build deduped image attachments per message to preserve history
       const deduped = dedupePreferredImages(json.outputs || [])
-      // Ensure SVGs are embedded as data URLs so they always render in <img>
+      // Ensure SVGs are embedded as data URLs so they always render in <img>; apply proxy/bust for others
       const attProcessed = await Promise.all(
-        deduped.map(async (o: any) => ({
-          type: "image" as const,
-          url: await toDisplayUrl(o),
-          variant: [o.variant, o.size].filter(Boolean).join(" ") || undefined,
-        }))
+        deduped.map(async (o: any) => {
+          const fmt = (o?.format || '').toLowerCase()
+          const isSvg = fmt === 'svg' || (o?.url || '').toLowerCase().endsWith('.svg')
+          const baseUrl = normalizeUrl(o?.url || '')
+          const url = isSvg ? await toDisplayUrl({ url: baseUrl, format: 'svg' }) : finalizeUrl(baseUrl)
+          return {
+            type: 'image' as const,
+            url,
+            variant: [o.variant, o.size].filter(Boolean).join(' ') || undefined,
+          }
+        })
       )
       let attachments: Array<{ type: "image"; url: string; variant?: string }> = attProcessed
+
+      // If a thumbnail_url is provided, use it as the first preview attachment (normalized and SVG-embedded if needed)
+      try {
+        const thumb = (json as any)?.thumbnail_url as string | undefined
+        if (thumb) {
+          const normalized = normalizeUrl(thumb)
+          const previewUrl = /\.svg(\?.*)?$/i.test(normalized)
+            ? await toDisplayUrl({ url: normalized, format: 'svg' })
+            : finalizeUrl(normalized)
+          // Avoid duplicates if the same URL already exists in attachments
+          const exists = attachments.some((a) => canonical((a as any).url) === canonical(previewUrl))
+          if (!exists) attachments.unshift({ type: 'image', url: previewUrl, variant: 'preview' })
+        }
+      } catch {}
       // Fallback: if no raster/SVG outputs were uploaded, embed the composed SVG directly if available
       if (attachments.length === 0 && json?.composition?.svg) {
         try {
@@ -448,8 +525,8 @@ export function ChatView() {
         const usedAnalysis = (json && json.analysis) ? json.analysis : (analysisForSend || activeConv.analysis)
         const originalRaw = usedAnalysis?.original_url_internal || usedAnalysis?.original_url || usedAnalysis?.original_data_url
         if (originalRaw) {
-          const origHref = normalizeUrl(originalRaw)
-          const hasOrig = attachments.some((a) => normalizeUrl((a as any).url) === origHref)
+          const origHref = finalizeUrl(normalizeUrl(originalRaw))
+          const hasOrig = attachments.some((a) => canonical((a as any).url) === canonical(origHref))
           if (!hasOrig) {
             attachments.unshift({ type: 'image', url: origHref, variant: 'original' })
           }

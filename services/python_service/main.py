@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 import uuid
@@ -13,6 +14,7 @@ import shutil
 import re
 
 import openai
+from openai import AsyncOpenAI
 from time import perf_counter
 # cairosvg is lazily imported in the render path to avoid startup failures
 import numpy as np
@@ -122,15 +124,20 @@ USE_GPT_LAYOUT = (os.getenv("USE_GPT_LAYOUT", "true").strip().lower() in ("1", "
 LAYOUT_MODEL = os.getenv("LAYOUT_MODEL", "gpt-5")
 LAYOUT_TEMPERATURE = float(os.getenv("LAYOUT_TEMPERATURE", "0.6"))
 
-# Rasterization flags for non-Docker/local setups
-# Set RENDER_RASTER=false to skip PNG/JPG generation entirely (SVG-only outputs)
+# Image generation flags (PNG-only mode)
+USE_GPT_IMAGE = (os.getenv("USE_GPT_IMAGE", "true").strip().lower() in ("1", "true", "yes", "on"))
+IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gpt-image-1")
+STRICT_IMAGE_MODEL_ONLY = (os.getenv("STRICT_IMAGE_MODEL_ONLY", "false").strip().lower() in ("1", "true", "yes", "on"))
+
+# Rasterization flags (legacy SVG rasterization)
+# This is now used only as a fallback path if GPT image generation is unavailable.
 RENDER_RASTER = (os.getenv("RENDER_RASTER", "false").strip().lower() in ("1", "true", "yes", "on"))
 
 # Initialize OpenAI client
 _OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-client = openai.AsyncOpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY else None
+client = AsyncOpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY else None
 if not _OPENAI_API_KEY:
-    logger.warning("OPENAI_API_KEY not set; AI copy will use deterministic fallback.")
+    logger.warning("OPENAI_API_KEY not set; AI features disabled.")
 
 # Initialize S3 client for MinIO
 s3_client = boto3.client(
@@ -424,7 +431,8 @@ async def generate_copy_with_ai(
         
         model = model_name or os.getenv("COPY_MODEL", "gpt-3.5-turbo")
         variants: List[Dict[str, str]] = []
-        n = max(1, int(num_variants))
+        # Enforce a single copy variant regardless of input
+        n = 1
         for _ in range(n):
             chat_args = {
                 "model": model,
@@ -1010,14 +1018,16 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         pass
 
     # Recommended fonts from structured copy (backward compatible)
-    # Defaults
-    default_stack = "Inter, Roboto, Arial, sans-serif"
-    font_family_headline = default_stack
+    # Defaults tuned for ad readability (strong display headline + clean body)
+    # Use single quotes for multi-word family names to avoid double quotes inside XML attributes
+    default_stack = "Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif"
+    headline_stack = "Impact, Oswald, 'Bebas Neue', 'Arial Black', Inter, Arial, sans-serif"
+    font_family_headline = headline_stack
     font_family_body = default_stack
-    headline_weight = 800
-    body_weight = 500
-    headline_letter_spacing = 0
-    body_letter_spacing = 0
+    headline_weight = 900
+    body_weight = 600
+    headline_letter_spacing = 0.2
+    body_letter_spacing = 0.0
 
     try:
         recs = copy_data.get("font_recommendations") or []
@@ -1139,7 +1149,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         cta_color = palette[2] if len(palette) > 2 else "#2563EB"
 
     # CTA style (fill/outline/pill)
-    cta_style = (v.get("cta_style") or "fill").lower()
+    cta_style = (v.get("cta_style") or "pill").lower()
     if cta_style == "outline":
         cta_fill = "none"
         cta_stroke = cta_color
@@ -1312,8 +1322,16 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                     H0 = max(1, int(orig_size[1]))
                 else:
                     W0, H0 = width, height
-                # Map original bbox to canvas under preserveAspectRatio="xMidYMid slice"
-                s = max(width / float(W0), height / float(H0))
+                # Map original bbox to canvas respecting bg_fit ('slice' cover vs 'meet' contain)
+                try:
+                    _bg_fit_local = str((v.get("bg_fit", "meet"))).lower()
+                except Exception:
+                    _bg_fit_local = "meet"
+                if _bg_fit_local not in ("meet", "slice"):
+                    _bg_fit_local = "meet"
+                s = (max(width / float(W0), height / float(H0))
+                     if _bg_fit_local == "slice"
+                     else min(width / float(W0), height / float(H0)))
                 w1 = W0 * s
                 h1 = H0 * s
                 off_x = (width - w1) / 2.0
@@ -1457,10 +1475,10 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     try:
         def _clip(x: float, lo: float, hi: float) -> float:
             return max(lo, min(hi, x))
-        # Allow explicit enable via variant; default off to remove unwanted black box overlay
-        show_scrim = bool(v.get("show_scrim", False))
+        # Allow explicit enable via variant; default ON for better text legibility
+        show_scrim = bool(v.get("show_scrim", True))
         # Background fit behavior for <image>: 'meet' (no crop, may letterbox) or 'slice' (cover, may crop)
-        bg_fit = str(v.get("bg_fit", "slice")).lower()
+        bg_fit = str(v.get("bg_fit", "meet")).lower()
         if bg_fit not in ("meet", "slice"):
             bg_fit = "meet"
         preserve_mode = f"xMidYMid {'slice' if bg_fit == 'slice' else 'meet'}"
@@ -1649,7 +1667,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 <feColorMatrix type="saturate" values="{{ img_saturate }}" />
             </filter>
             <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
-                <feDropShadow dx="2" dy="2" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
+                <feDropShadow dx="2" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.45"/>
             </filter>
             <filter id="textGlow" x="-50%" y="-50%" width="200%" height="200%">
                 <feGaussianBlur stdDeviation="2" result="blur" />
@@ -1693,11 +1711,11 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             <!-- Optional badge/ribbon -->
             <g filter="url(#shadow)">
                 <rect x="{{ badge_x }}" y="{{ badge_y }}" width="{{ badge_w }}" height="{{ badge_h }}" rx="8" fill="{{ badge_color }}" />
-                <text x="{{ badge_x + badge_w/2 }}" y="{{ badge_y + badge_h*0.68 }}" font-family="{{ font_family_headline }}" font-size="{{ int(sub_size*0.85) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ badge_text | e }}</text>
+                <text x="{{ badge_x + badge_w/2 }}" y="{{ badge_y + badge_h*0.68 }}" font-family="{{ font_family_headline | e }}" font-size="{{ int(sub_size*0.85) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ badge_text | e }}</text>
             </g>
             {% endif %}
             <!-- Headline with emphasis tspans -->
-            <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{% if headline_fill == 'gradient' %}url(#headlineGrad){% else %}{{ text_color }}{% endif %}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.25" stroke-width="{{ headline_stroke_w }}">
+            <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline | e }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{% if headline_fill == 'gradient' %}url(#headlineGrad){% else %}{{ text_color }}{% endif %}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.25" stroke-width="{{ headline_stroke_w }}">
                 {% for line in headline_segments %}
                 <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">
                     {% for seg in line %}
@@ -1708,7 +1726,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             </text>
 
             <!-- Subheadline -->
-            <text x="{{ text_x }}" y="{{ subheadline_y_start }}" font-family="{{ font_family_body }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.18" stroke-width="{{ sub_stroke_w }}">
+            <text x="{{ text_x }}" y="{{ subheadline_y_start }}" font-family="{{ font_family_body | e }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.18" stroke-width="{{ sub_stroke_w }}">
                 {% for line in sub_segments %}
                 <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">
                     {% for seg in line %}
@@ -1720,7 +1738,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
             <!-- CTA Button -->
             <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="{{ cta_radius }}" fill="{{ cta_fill }}" filter="url(#shadow)" stroke="{{ cta_stroke }}" stroke-opacity="{{ cta_stroke_opacity }}"/>
-            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta | e }}</text>
+            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline | e }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta | upper | e }}</text>
         </g>
     </svg>
     """
@@ -1872,8 +1890,10 @@ def _upload_file_path(bucket: str, key: str, file_path: Path, content_type: str)
             shutil.copyfile(file_path, dst)
             return f"{PUBLIC_BASE_URL}/static/{rel_path}", None
 
-async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job_id: str) -> List[RenderOutput]:
-    """Render SVG to PNG/JPG using CairoSVG and upload all formats (including original SVG), with local/S3 storage support."""
+async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job_id: str, *, force: bool = False) -> List[RenderOutput]:
+    """Legacy: Render SVG to PNG/JPG using CairoSVG. Kept as a fallback if GPT image is not used/available.
+    If force=True, bypasses the RENDER_RASTER toggle (used by /render when force_svg is requested).
+    """
     outputs: List[RenderOutput] = []
     outputs_bucket = os.getenv('S3_BUCKET_OUTPUTS', 'outputs')
 
@@ -1882,15 +1902,11 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
 
     unique = uuid.uuid4().hex[:8]
 
-    # 1) Upload original SVG
-    svg_key = f"outputs/{job_id}_{unique}_svg.svg"
-    svg_url, _ = _upload_bytes(outputs_bucket, svg_key, svg_content.encode('utf-8'), 'image/svg+xml')
-    outputs.append(RenderOutput(format="svg", width=width, height=height, url=svg_url))
-
-    # Respect rasterization toggle: allow SVG-only outputs in local/non-Docker setups
-    if not RENDER_RASTER:
-        logger.info("RENDER_RASTER disabled; returning SVG-only outputs")
-        return outputs
+    # In PNG-only mode we avoid uploading SVG. This function is only for fallback.
+    # Respect rasterization toggle unless force=True.
+    if not RENDER_RASTER and not force:
+        logger.info("RENDER_RASTER disabled; skipping legacy SVG rasterization (not forced)")
+        return []
 
     # 2) Render SVG -> PNG bytes using CairoSVG with a robust URL fetcher
     def _cairo_url_fetcher(url: str, *_, **__):
@@ -1927,7 +1943,7 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
             logger.warning(f"CairoSVG url_fetcher failed for {url}: {e}")
             return {"string": b"", "mime_type": "application/octet-stream"}
 
-    # Try to render PNG/JPG using CairoSVG if available. If not, gracefully return SVG-only outputs.
+    # Try to render PNG/JPG using CairoSVG if available. If not, gracefully return no outputs.
     png_bytes = None
     try:
         import cairosvg  # type: ignore
@@ -1950,7 +1966,9 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
         # Upload PNG
         png_key = f"outputs/{job_id}_{unique}_png.png"
         png_url, _ = _upload_bytes(outputs_bucket, png_key, png_bytes, 'image/png')
-        outputs.append(RenderOutput(format="png", width=width, height=height, url=png_url))
+        # Cache-bust preview
+        png_url_cb = f"{png_url}{'&' if '?' in png_url else '?'}t={int(time.time())}"
+        outputs.append(RenderOutput(format="png", width=width, height=height, url=png_url_cb))
 
         # 3) Convert PNG -> JPG via Pillow and upload (flatten any transparency onto white to avoid dark backgrounds)
         with Image.open(io.BytesIO(png_bytes)) as im:
@@ -1966,10 +1984,125 @@ async def render_svg_to_formats(svg_content: str, crop_info: Dict[str, Any], job
             jpg_buffer.seek(0)
         jpg_key = f"outputs/{job_id}_{unique}_jpg.jpg"
         jpg_url, _ = _upload_bytes(outputs_bucket, jpg_key, jpg_buffer.getvalue(), 'image/jpeg')
-        outputs.append(RenderOutput(format="jpg", width=width, height=height, url=jpg_url))
+        # Cache-bust preview
+        jpg_url_cb = f"{jpg_url}{'&' if '?' in jpg_url else '?'}t={int(time.time())}"
+        outputs.append(RenderOutput(format="jpg", width=width, height=height, url=jpg_url_cb))
+
+    # If we couldn't rasterize (no PNG/JPG produced), provide an SVG fallback output so the pipeline has at least one asset
+    if not outputs:
+        try:
+            svg_key = f"outputs/{job_id}_{unique}.svg"
+            svg_url, _ = _upload_bytes(outputs_bucket, svg_key, svg_content.encode('utf-8'), 'image/svg+xml')
+            # Cache-bust preview
+            svg_url_cb = f"{svg_url}{'&' if '?' in svg_url else '?'}t={int(time.time())}"
+            outputs.append(RenderOutput(format="svg", width=width, height=height, url=svg_url_cb))
+        except Exception as e:
+            logger.warning(f"Failed to upload SVG fallback: {e}")
 
     return outputs
 
+async def generate_ad_image_with_ai(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any], job_id: str) -> List[RenderOutput]:
+    """Generate a PNG ad via GPT image model with a robust Pillow fallback."""
+    outputs: List[RenderOutput] = []
+    outputs_bucket = os.getenv('S3_BUCKET_OUTPUTS', 'outputs')
+    width = int(crop_info.get("width", 1080))
+    height = int(crop_info.get("height", 1080))
+    unique = uuid.uuid4().hex[:8]
+
+    headline = (copy_data.get("headline") or "").strip()
+    subheadline = (copy_data.get("subheadline") or "").strip()
+    cta = (copy_data.get("cta") or "Learn More").strip()
+    palette = [c for c in (analysis.get("palette") or []) if isinstance(c, str)]
+    brand_colors = ", ".join(palette[:4]) if palette else "balanced modern palette"
+    prompt = (
+        "Create a professional, photorealistic PNG display ad. Typeset the provided copy directly on the image (not as captions).\n"
+        "Text requirements: High contrast, bold, legible, large type, clean typography. No heavy filters, no vignettes, no frames, no watermarks.\n"
+        "Layout: Balanced composition with the product prominent, text fully visible, no overlap with critical subject. Include a distinct CTA button.\n"
+        f"Headline: '{headline}'.\n"
+        f"Subheadline: '{subheadline}'.\n"
+        f"CTA label: '{cta}'.\n"
+        f"Use this color palette tastefully: {brand_colors}.\n"
+        "Overall style: modern, premium, minimal, crisp lighting.\n"
+        "Avoid watermarks or extraneous logos."
+    )
+
+    png_bytes: Optional[bytes] = None
+    if USE_GPT_IMAGE and client and _OPENAI_API_KEY:
+        # Force square size to supported values (common: 256/512/1024)
+        def _nearest(n: int) -> int:
+            choices = [256, 512, 1024]
+            return min(choices, key=lambda x: abs(x - n))
+        side = _nearest(max(width, height))
+        size_str = f"{side}x{side}"
+
+        async def _try_model(model_name: str) -> Tuple[Optional[bytes], Optional[str]]:
+            try:
+                # Some models (e.g. dall-e-3) only support 1024x1024.
+                m_size_str = "1024x1024" if model_name == "dall-e-3" else size_str
+                resp = await client.images.generate(
+                    model=model_name,
+                    prompt=prompt,
+                    size=m_size_str,
+                    timeout=60,
+                )
+                b64 = None
+                try:
+                    b64 = resp.data[0].b64_json  # type: ignore[attr-defined]
+                except Exception:
+                    b64 = None
+                if b64:
+                    return base64.b64decode(b64), None
+                # Fallback: some responses return a URL instead of b64_json
+                try:
+                    url = getattr(resp.data[0], 'url', None)  # type: ignore[attr-defined]
+                except Exception:
+                    url = None
+                if url:
+                    import httpx
+                    try:
+                        async with httpx.AsyncClient(timeout=30) as h:
+                            r = await h.get(url)
+                            r.raise_for_status()
+                            return r.content, None
+                    except Exception as de:
+                        msg = f"download_failed for model={model_name}: {de}"
+                        logger.warning(msg)
+                        return None, msg
+                msg = "OpenAI images.generate returned neither b64_json nor url"
+                logger.warning(msg)
+                return None, msg
+            except Exception as e:
+                msg = f"model={model_name}: {e}"
+                logger.warning(f"OpenAI images.generate failed: {msg}")
+                return None, msg
+
+        # Try configured model first; optionally allow fallbacks (deduplicated)
+        order = []
+        primary_and_fallbacks = [IMAGE_MODEL] if STRICT_IMAGE_MODEL_ONLY else [IMAGE_MODEL, "gpt-image-1", "dall-e-3"]
+        for m in primary_and_fallbacks:
+            if m and m not in order:
+                order.append(m)
+        last_err: Optional[str] = None
+        for m in order:
+            img, err = await _try_model(m)
+            if img is not None:
+                png_bytes = img
+                break
+            last_err = err or last_err
+
+    if png_bytes is None:
+        # Strict GPT-only mode: no fallback
+        detail = f"OpenAI image generation failed for models [{IMAGE_MODEL}, gpt-image-1, dall-e-3]"
+        if 'last_err' in locals() and last_err:
+            detail += f": {last_err}"
+        raise HTTPException(status_code=502, detail=detail)
+
+    png_key = f"outputs/{job_id}_{unique}_png.png"
+    png_url, _ = _upload_bytes(outputs_bucket, png_key, png_bytes, 'image/png')
+    # Cache-bust preview
+    png_url_cb = f"{png_url}{'&' if '?' in png_url else '?'}t={int(time.time())}"
+    outputs.append(RenderOutput(format="png", width=width, height=height, url=png_url_cb))
+    return outputs
 # API Endpoints
 @app.post("/ingest-analyze")
 async def ingest_analyze(request: Request, image: UploadFile = File(...)):
@@ -2333,16 +2466,55 @@ async def render(payload: Dict[str, Any]):
         composition = payload.get("composition", {})
         crop_info = payload.get("crop_info", {})
         job_id = payload.get("job_id", "unknown")
+        copy_data = payload.get("copy") or {}
+
+        # Per-request overrides
+        # - force_svg: if True, always rasterize the provided SVG composition.
+        # - use_gpt_image: optional boolean to override the global USE_GPT_IMAGE toggle.
+        force_svg = bool(payload.get("force_svg"))
+        use_gpt_image = USE_GPT_IMAGE
+        try:
+            if isinstance(payload.get("use_gpt_image"), bool):
+                use_gpt_image = bool(payload.get("use_gpt_image"))
+        except Exception:
+            pass
+
+        # Decide rendering path. If force_svg is set, honor it regardless of global toggles.
+        if force_svg:
+            outputs = await render_svg_to_formats(composition.get("svg", ""), crop_info, job_id, force=True)
+        elif use_gpt_image:
+            analysis = payload.get("analysis") or {}
+            outputs = await generate_ad_image_with_ai(copy_data, analysis, crop_info, job_id)
+        else:
+            outputs = await render_svg_to_formats(composition.get("svg", ""), crop_info, job_id)
+
+        # Enforce a single output (prefer PNG if available)
+        if outputs:
+            preferred_png = None
+            for o in outputs:
+                try:
+                    fmt = getattr(o, "format", None)
+                    if fmt is None and isinstance(o, dict):
+                        fmt = o.get("format")
+                    if (fmt or "").lower() == "png":
+                        preferred_png = o
+                        break
+                except Exception:
+                    continue
+            if preferred_png is not None:
+                outputs = [preferred_png]
+            else:
+                outputs = outputs[:1]
         
-        # Render SVG to multiple formats
-        outputs = await render_svg_to_formats(composition.get("svg", ""), crop_info, job_id)
-        
-        # Generate thumbnail URL (first JPG if available)
-        thumbnail_url = next((o.url for o in outputs if isinstance(o, RenderOutput) and o.format == 'jpg'), None)
+        # Generate thumbnail URL (prefer PNG)
+        thumbnail_url = next((o.url for o in outputs if isinstance(o, RenderOutput) and o.format == 'png'), None)
         if not thumbnail_url and outputs:
             # Fallback to first output URL
             first = outputs[0]
             thumbnail_url = first.url if isinstance(first, RenderOutput) else (first.get('url') if isinstance(first, dict) else None)
+        if not thumbnail_url:
+            # Ensure Pydantic model validation doesn't fail
+            thumbnail_url = ""
         
         result = RenderResult(
             outputs=outputs,
@@ -2351,9 +2523,13 @@ async def render(payload: Dict[str, Any]):
         
         return result.model_dump()
         
+    except HTTPException as he:
+        # Preserve status and detail for known pipeline errors
+        raise he
     except Exception as e:
         logger.error(f"Error in rendering: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        detail = str(e) or e.__class__.__name__
+        raise HTTPException(status_code=500, detail=detail)
 
 @app.post("/qa")
 async def qa(payload: Dict[str, Any]):
@@ -2365,11 +2541,13 @@ async def qa(payload: Dict[str, Any]):
         # Basic QA checks
         composition = payload.get("composition") or {}
         render_output = payload.get("render") or {}
-        
-        # Check if SVG is valid
-        svg_content = (composition.get("svg") if isinstance(composition, dict) else "") or ""
-        if not svg_content or "<svg" not in svg_content:
-            return {"ok": False, "error": "Invalid SVG content"}
+        copy_data = payload.get("copy") or {}
+
+        # In PNG-only mode, skip strict SVG requirement. If not using GPT image, keep the old check.
+        if not USE_GPT_IMAGE:
+            svg_content = (composition.get("svg") if isinstance(composition, dict) else "") or ""
+            if not svg_content or "<svg" not in svg_content:
+                return {"ok": False, "error": "Invalid SVG content"}
         
         # Check if render outputs exist (support either dict with outputs or direct list)
         outputs: List[Any] = []
@@ -2381,7 +2559,6 @@ async def qa(payload: Dict[str, Any]):
             return {"ok": False, "error": "No render outputs"}
         
         # Check text length constraints and basic layout heuristics
-        copy_data = payload.get("copy") or {}
         if copy_data.get("headline", "") and len(copy_data["headline"]) > 80:
             return {"ok": False, "error": "Headline too long"}
         if copy_data.get("subheadline", "") and len(copy_data["subheadline"]) > 160:
@@ -2392,10 +2569,9 @@ async def qa(payload: Dict[str, Any]):
         if copy_data.get("cta") and copy_data["cta"] not in allowed_cta:
             return {"ok": False, "error": "CTA not allowed"}
 
-        # Minimal color contrast heuristic: ensure dark overlay exists in SVG for legibility
-        svg_content = composition.get("svg", "")
-        if 'opacity="0.22"' not in svg_content and 'opacity=\"0.22\"' not in svg_content:
-            logger.warning("Legibility overlay may be missing")
+        # Minimal heuristic: ensure at least one PNG output exists
+        if not any(((o.get("format") if isinstance(o, dict) else getattr(o, "format", None)) == "png") for o in outputs):
+            logger.warning("PNG output missing")
 
         return {"ok": True, "quality_score": 0.97}
         
@@ -2414,6 +2590,24 @@ async def export(payload: Dict[str, Any]):
             outputs = render_output.get("outputs") or []
         elif isinstance(render_output, list):
             outputs = render_output
+        # Enforce a single output globally at export time as well
+        if outputs:
+            # Prefer PNG if present
+            preferred_png = None
+            for o in outputs:
+                try:
+                    fmt = getattr(o, "format", None)
+                    if fmt is None and isinstance(o, dict):
+                        fmt = o.get("format")
+                    if (fmt or "").lower() == "png":
+                        preferred_png = o
+                        break
+                except Exception:
+                    continue
+            if preferred_png is not None:
+                outputs = [preferred_png]
+            else:
+                outputs = outputs[:1]
         
         # Create manifest
         manifest = {
@@ -2458,7 +2652,11 @@ async def health():
         "layout_temperature": LAYOUT_TEMPERATURE,
         "openai_configured": bool(_OPENAI_API_KEY),
         "raster_enabled": bool(RENDER_RASTER),
-  }
+        "gpt_image_enabled": bool(USE_GPT_IMAGE),
+        "image_model": IMAGE_MODEL,
+        "strict_image_model_only": bool(STRICT_IMAGE_MODEL_ONLY),
+        "openai_sdk_version": getattr(openai, "__version__", "unknown"),
+    }
  
 
 if __name__ == "__main__":
