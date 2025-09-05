@@ -30,7 +30,7 @@ function nowIso() {
 }
 
 // Deterministic 32-bit hash for seeds (Edge-safe, no Node crypto required)
-function hash32(str: string): number {
+function hash32(str: string): number { //
   let h = 2166136261 >>> 0; // FNV-1a basis
   for (let i = 0; i < str.length; i++) {
     h ^= str.charCodeAt(i);
