@@ -972,6 +972,26 @@ def _derive_secondary_color(base_hex: str) -> str:
     except Exception:
         return '#e5e5e5'
 
+def _is_light_color(hex_color: str) -> bool:
+    """Return True if the color is perceptually light."""
+    try:
+        h = _normalize_hex_color(hex_color) or '#ffffff'
+        r = int(h[1:3], 16)
+        g = int(h[3:5], 16)
+        b = int(h[5:7], 16)
+        brightness = (r * 299 + g * 587 + b * 114) / 1000.0
+        return brightness >= 145
+    except Exception:
+        return True
+
+def _contrast_text_color(base_hex: str) -> str:
+    """Choose a strong contrasting text fill against the base color.
+    If base is light, return near-black; else return near-white."""
+    try:
+        return '#0a0a0a' if _is_light_color(base_hex) else '#ffffff'
+    except Exception:
+        return '#0a0a0a'
+
 def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any], *, smart_layout: bool = True, panel_side_override: Optional[str] = None, text_color_override: Optional[str] = None, variant: Optional[Dict[str, Any]] = None) -> str:
     """Create SVG composition with a professional layout and support for emphasis tspans.
     - Full-bleed background image with strong legibility gradient
@@ -1016,6 +1036,42 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 text_color_secondary = _derive_secondary_color(norm)
     except Exception:
         pass
+
+    # Highlight styling: contrasting fill on top of a stroke matching the base text color
+    try:
+        # Allow optional override via variant
+        highlight_override = None
+        try:
+            highlight_override = v.get("highlight_text_color")
+        except Exception:
+            highlight_override = None
+        if isinstance(highlight_override, str):
+            norm_h = _normalize_hex_color(highlight_override)
+            highlight_text_color = norm_h if norm_h else _contrast_text_color(text_color)
+        else:
+            highlight_text_color = _contrast_text_color(text_color)
+    except Exception:
+        highlight_text_color = _contrast_text_color(text_color)
+
+    # Stroke widths for highlight effect (thicker than normal text stroke)
+    try:
+        scale = v.get("highlight_stroke_scale")
+        try:
+            s = float(scale)
+            # clamp
+            if s < 0.6:
+                s = 0.6
+            if s > 1.6:
+                s = 1.6
+        except Exception:
+            s = 1.0
+    except Exception:
+        s = 1.0
+    headline_highlight_stroke_w = max(1, int(headline_size * 0.12 * s))
+    sub_highlight_stroke_w = max(1, int(sub_size * 0.10 * s))
+    # Stroke colors follow the base text colors of their respective blocks
+    headline_highlight_stroke = text_color
+    sub_highlight_stroke = text_color_secondary
 
     # Recommended fonts from structured copy (backward compatible)
     # Defaults tuned for ad readability (strong display headline + clean body)
@@ -1714,23 +1770,23 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 <text x="{{ badge_x + badge_w/2 }}" y="{{ badge_y + badge_h*0.68 }}" font-family="{{ font_family_headline | e }}" font-size="{{ int(sub_size*0.85) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ badge_text | e }}</text>
             </g>
             {% endif %}
-            <!-- Headline with emphasis tspans -->
+            <!-- Headline with emphasis tspans (supports 'highlight' style) -->
             <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline | e }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{% if headline_fill == 'gradient' %}url(#headlineGrad){% else %}{{ text_color }}{% endif %}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.25" stroke-width="{{ headline_stroke_w }}">
                 {% for line in headline_segments %}
                 <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">
                     {% for seg in line %}
-                    <tspan{% if seg.style == 'bold' %} font-weight="800"{% elif seg.style == 'italic' %} font-style="italic"{% endif %}>{{ (seg.text | upper if seg.style == 'caps' else seg.text) | e }}</tspan>
+                    <tspan{% if seg.style == 'bold' %} font-weight="800"{% elif seg.style == 'italic' %} font-style="italic"{% endif %}{% if seg.style == 'highlight' %} fill="{{ highlight_text_color }}" stroke="{{ headline_highlight_stroke }}" stroke-width="{{ headline_highlight_stroke_w }}" stroke-opacity="1" paint-order="stroke fill" stroke-linejoin="round" stroke-linecap="round"{% endif %}>{{ (seg.text | upper if seg.style == 'caps' else seg.text) | e }}</tspan>
                     {% endfor %}
                 </tspan>
                 {% endfor %}
             </text>
 
-            <!-- Subheadline -->
+            <!-- Subheadline (supports 'highlight' style) -->
             <text x="{{ text_x }}" y="{{ subheadline_y_start }}" font-family="{{ font_family_body | e }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.18" stroke-width="{{ sub_stroke_w }}">
                 {% for line in sub_segments %}
                 <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">
                     {% for seg in line %}
-                    <tspan{% if seg.style == 'bold' %} font-weight="700"{% elif seg.style == 'italic' %} font-style="italic"{% endif %}>{{ (seg.text | upper if seg.style == 'caps' else seg.text) | e }}</tspan>
+                    <tspan{% if seg.style == 'bold' %} font-weight="700"{% elif seg.style == 'italic' %} font-style="italic"{% endif %}{% if seg.style == 'highlight' %} fill="{{ highlight_text_color }}" stroke="{{ sub_highlight_stroke }}" stroke-width="{{ sub_highlight_stroke_w }}" stroke-opacity="1" paint-order="stroke fill" stroke-linejoin="round" stroke-linecap="round"{% endif %}>{{ (seg.text | upper if seg.style == 'caps' else seg.text) | e }}</tspan>
                     {% endfor %}
                 </tspan>
                 {% endfor %}

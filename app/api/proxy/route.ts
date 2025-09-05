@@ -10,16 +10,32 @@ export const maxDuration = 60;
 // - Optional host restriction via PIPELINE_URL_ALLOW_HOST (comma-separated) to reduce SSRF risk.
 
 const ALLOW_HOSTS = (process.env.PIPELINE_URL_ALLOW_HOST || process.env.NEXT_PUBLIC_PIPELINE_URL || "http://localhost:8010")
-  .split(/[,\s]+/)
+  .split(/[\s,]+/)
   .map((s) => s.trim())
   .filter(Boolean);
+
+function isLoopbackHost(host: string) {
+  const h = (host || "").toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "0.0.0.0";
+}
+
+function portsMatch(allowPort: string, targetPort: string) {
+  // If allowPort is empty, treat 80/443 as defaults
+  if (!allowPort) {
+    return targetPort === "" || targetPort === "80" || targetPort === "443";
+  }
+  return allowPort === targetPort;
+}
 
 function allowed(url: URL) {
   if (ALLOW_HOSTS.length === 0) return true;
   return ALLOW_HOSTS.some((base) => {
     try {
       const b = new URL(base);
-      return b.hostname === url.hostname && (!b.port || b.port === url.port || (b.port === "" && (url.port === "80" || url.port === "443")));
+      const sameHost = b.hostname === url.hostname;
+      const bothLoopback = isLoopbackHost(b.hostname) && isLoopbackHost(url.hostname);
+      const hostOk = sameHost || bothLoopback;
+      return hostOk && portsMatch(b.port, url.port);
     } catch {
       return false;
     }

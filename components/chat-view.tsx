@@ -39,13 +39,10 @@ async function toDisplayUrl(o: { url: string; format?: string }): Promise<string
     if (u.startsWith("data:")) return u
     const isSvg = fmt === "svg" || u.toLowerCase().endsWith(".svg")
     if (!isSvg) return u
-    // If we're on https and the URL is http, proxy to avoid mixed-content blocking
-    try {
-      if (typeof window !== 'undefined' && window.location.protocol === 'https:' && /^http:\/\//i.test(u)) {
-        u = `/api/proxy?u=${encodeURIComponent(u)}&t=${Date.now()}`
-      }
-    } catch {}
-    const res = await fetch(u, { cache: "no-store" })
+    // Use finalized URL (normalize + cache-bust + proxy if cross-origin or protocol-mismatch)
+    let fetchUrl = u
+    try { fetchUrl = finalizeUrl(u) } catch {}
+    const res = await fetch(fetchUrl, { cache: "no-store" })
     const ct = res.headers?.get?.("content-type") || ""
     if (!res.ok) {
       console.warn("toDisplayUrl: fetch failed", { url: u, status: res.status, ct })
@@ -163,7 +160,11 @@ function addCacheBust(u: string): string {
 function needsProxy(u: string): boolean {
   try {
     if (typeof window === 'undefined') return false
-    return window.location.protocol === 'https:' && /^http:\/\//i.test(u)
+    const loc = window.location
+    const target = new URL(u, loc.href)
+    const protocolMismatch = loc.protocol === 'https:' && target.protocol === 'http:'
+    const crossOrigin = target.origin !== loc.origin
+    return protocolMismatch || crossOrigin
   } catch { return false }
 }
 
@@ -528,7 +529,14 @@ export function ChatView() {
           const origHref = finalizeUrl(normalizeUrl(originalRaw))
           const hasOrig = attachments.some((a) => canonical((a as any).url) === canonical(origHref))
           if (!hasOrig) {
-            attachments.unshift({ type: 'image', url: origHref, variant: 'original' })
+            // Prefer to place the original image right after the preview (if present)
+            const previewIndex = attachments.findIndex((a) => (a as any).variant === 'preview')
+            if (previewIndex >= 0) {
+              attachments.splice(previewIndex + 1, 0, { type: 'image', url: origHref, variant: 'original' })
+            } else {
+              // If no preview exists, place original at the front
+              attachments.unshift({ type: 'image', url: origHref, variant: 'original' })
+            }
           }
         }
       } catch {}
