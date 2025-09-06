@@ -1,2 +1,10 @@
-MadworksAI - your AI marketing department.
-next environment: npm install -> npm run dev -> route API to "https://madworks.onrender.com" or run it locally: ~services/python_service py -m main.py
+**MadworksAI - your new AI marketing team.**
+
+next environment: 
+npm install 
+-> 
+npm run dev 
+-> 
+route API to "https://madworks.onrender.com" 
+or 
+run API locally: ~/services/python_service py -m main.py
