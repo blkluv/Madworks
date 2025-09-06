@@ -1,1 +1,1 @@
-**madworks ai - the agentic marketing department.
+MadworksAI - your AI marketing department.
