@@ -285,109 +285,86 @@ export async function POST(req: Request) {
     logStep(logs, "copy", "error", "Failed to generate copy", undefined, Date.now() - t1, e);
   }
 
-  // Step 3 + 4: Compose and Render for multiple aspect ratios
-  const defaultSizes = [
-    { name: "square", width: 1080, height: 1080 },
-  ];
-  // Ignore provided sizes to ensure only one output is generated
-  const sizesToUse = defaultSizes as Array<{ name?: string; width: number; height: number }>;
+  // Step 3 + 4: Compose and Render for a single aspect ratio
+  // Prefer the original uploaded image dimensions when available to match input format exactly
+  let sizesToUse: Array<{ name?: string; width: number; height: number }> = []
+  try {
+    const osz = Array.isArray((analysis as any)?.original_size) ? (analysis as any).original_size : null
+    const ow = Number(osz?.[0])
+    const oh = Number(osz?.[1])
+    if (Number.isFinite(ow) && Number.isFinite(oh) && ow > 0 && oh > 0) {
+      sizesToUse = [{ name: "original", width: ow, height: oh }]
+    }
+  } catch {}
+  if (!sizesToUse.length) {
+    sizesToUse = [{ name: "square", width: 1080, height: 1080 }]
+  }
   const combinedOutputs: any[] = []
   let combinedThumb: string | undefined = undefined
   try {
-    const copyVariants = (Array.isArray(copy?.variants) && copy.variants.length
-      ? copy.variants.slice(0, 1) // Use only the first variant
-      : [copy?.headline
-          ? { headline: copy.headline, subheadline: copy.subheadline, cta: copy.cta, emphasis_ranges: copy?.emphasis_ranges, font_recommendations: copy?.font_recommendations }
-          : { headline: "", subheadline: "", cta: "Learn More" }]);
+    // Use the first size (original when available) and generate ALL modern variants via catalog
+    const s = sizesToUse[0]
+    const seedStr = `${job_id}|${s.name}|${s.width}x${s.height}`
+    const seed = (variant_seed_override ?? hash32(seedStr))
+    const v0 = (Array.isArray(copy?.variants) && copy.variants.length)
+      ? copy.variants[0]
+      : (copy?.headline ? { headline: copy.headline, subheadline: copy.subheadline, cta: copy.cta, emphasis_ranges: copy?.emphasis_ranges, font_recommendations: copy?.font_recommendations } : { headline: "", subheadline: "", cta: "Learn More" })
 
-    for (let vi = 0; vi < copyVariants.length; vi++) {
-      const v = copyVariants[vi];
-      const vLabel = `v${vi + 1}`;
-      for (const s of sizesToUse) {
-        // Decide which sides to render: honor explicit panel_side when provided; otherwise use only center
-        const sidesToUse = panel_side ? [panel_side] : ["center"];
+    const t2 = Date.now()
+    logStep(logs, `compose_variants_${s.name}`, "start", `Composing ALL modern variants for ${s.width}x${s.height}`)
+    const compVariantsPayload: any = {
+      copy: v0,
+      analysis: analysis || {},
+      crop_info: { width: s.width, height: s.height },
+      catalog: "modern",
+      variant_seed: seed,
+      ...(text_color_override ? { text_color_override } : {}),
+      ...(panel_side ? { panel_side } : {}),
+    }
+    const compv = await fetchJson(
+      `${PIPELINE_URL}/compose_variants`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(compVariantsPayload),
+      },
+      TIMEOUTS.compose,
+    )
+    const comps: Array<any> = Array.isArray(compv?.compositions) ? compv.compositions : []
+    if (!composition && comps[0]) composition = comps[0] // capture one for backward compat
+    logStep(logs, `compose_variants_${s.name}`, "ok", `Composed ${comps.length} variants`, { count: comps.length }, Date.now() - t2)
 
-        // Build a deterministic base variant per (job_id, variant, size)
-        const seedStr = `${job_id}|${vLabel}|${s.name}|${s.width}x${s.height}`;
-        const seed = (variant_seed_override ?? hash32(seedStr));
-        const rng = makeRng(seed >>> 0);
-        const ctaStyles = ["fill", "outline", "pill"] as const;
-        let baseVariant: any = {
-          seed,
-          // Keep base config identical across sides; suppress flip so left/right differ only by side
-          flip_panel: false,
-          cta_style: ctaStyles[Math.floor(rng() * ctaStyles.length)],
-          cta_width_mode: rng() < 0.5 ? "auto" : "wide",
-          cta_gap_scale: Math.round((0.92 + rng() * 0.3) * 100) / 100,
-          shade_factor: Math.round((0.95 + rng() * 0.2) * 100) / 100,
-          side_shade_factor: Math.round((0.95 + rng() * 0.25) * 100) / 100,
-        };
-        if (variant_override && typeof variant_override === 'object') {
-          baseVariant = { ...baseVariant, ...variant_override };
-        }
-
-        for (const side of sidesToUse) {
-          const sideLabel = `${vLabel}-${side}`;
-          const t2 = Date.now();
-          logStep(logs, `compose_${s.name}_${sideLabel}`, "start", `Composing SVG ${s.width}x${s.height} for ${sideLabel}`);
-          const variant = { ...baseVariant, panel_side: side };
-          const composePayload: any = {
-            copy: v,
-            analysis: analysis || {},
-            crop_info: { width: s.width, height: s.height },
-            variant,
-            variant_seed: seed,
-            ...(text_color_override ? { text_color_override } : {}),
-            panel_side: side,
-          };
-          const comp = await fetchJson(
-            `${PIPELINE_URL}/compose`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(composePayload),
-            },
-            TIMEOUTS.compose,
-          );
-          if (!composition) composition = comp; // capture first for backward compat
-          logStep(logs, `compose_${s.name}_${sideLabel}`, "ok", "SVG composed", { composition_id: comp?.composition_id }, Date.now() - t2);
-
-          const t3 = Date.now();
-          logStep(logs, `render_${s.name}_${sideLabel}`, "start", `Rendering ${s.width}x${s.height} for ${sideLabel}`);
-          const renderPayload = {
-            composition: comp,
-            crop_info: { width: s.width, height: s.height },
-            job_id,
-            // Force SVG rasterization so the original uploaded image in the SVG is used as the background
-            force_svg: true,
-            // Also pass analysis for completeness; backend may use it for future logic
-            analysis: analysis || {},
-            // Explicitly disable GPT image generation for this request
-            use_gpt_image: false,
-            // Provide copy context in case QA or future hooks need it
-            copy: v,
-          };
-          const r = await fetchJson(
-            `${PIPELINE_URL}/render`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(renderPayload),
-            },
-            TIMEOUTS.render,
-          );
-          // Tag outputs with copy variant, side, and size for client-side use
-          const outs = (r?.outputs || []).map((o: any) => ({ ...o, variant: sideLabel, size: s.name }));
-          if (outs.length > 0) {
-            combinedOutputs.push(outs[0]);
-          }
-          if (!combinedThumb) combinedThumb = r?.thumbnail_url;
-          logStep(logs, `render_${s.name}_${sideLabel}`, "ok", "Rendered outputs", { outputs: outs.length }, Date.now() - t3);
-        }
+    // Render each composed SVG
+    for (let i = 0; i < comps.length; i++) {
+      const comp = comps[i]
+      const label = comp?.preset_name || comp?.preset_id || `variant_${i+1}`
+      const t3 = Date.now()
+      logStep(logs, `render_${s.name}_${label}`, "start", `Rendering ${s.width}x${s.height} for ${label}`)
+      const renderPayload = {
+        composition: comp,
+        crop_info: { width: s.width, height: s.height },
+        job_id,
+        force_svg: true,
+        analysis: analysis || {},
+        use_gpt_image: false,
+        copy: v0,
       }
+      const r = await fetchJson(
+        `${PIPELINE_URL}/render`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(renderPayload),
+        },
+        TIMEOUTS.render,
+      )
+      const outs = (r?.outputs || []).map((o: any) => ({ ...o, variant: label, size: s.name }))
+      if (outs.length > 0) combinedOutputs.push(outs[0])
+      if (!combinedThumb) combinedThumb = r?.thumbnail_url
+      logStep(logs, `render_${s.name}_${label}`, "ok", "Rendered outputs", { outputs: outs.length }, Date.now() - t3)
     }
 
-    renderRes = { outputs: combinedOutputs, thumbnail_url: combinedThumb };
+    renderRes = { outputs: combinedOutputs, thumbnail_url: combinedThumb }
   } catch (e) {
     ok = false;
     logStep(logs, "render_all", "error", "Failed composing/rendering variants", undefined, undefined, e);

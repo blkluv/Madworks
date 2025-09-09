@@ -7,9 +7,19 @@ export const maxDuration = 60;
 // Usage: /api/proxy?u=<absolute-url>
 // - Returns upstream bytes with the same content-type.
 // - No caching by default to ensure instant refresh during dev.
-// - Optional host restriction via PIPELINE_URL_ALLOW_HOST (comma-separated) to reduce SSRF risk.
+// - Optional host restriction via PIPELINE_URL_ALLOW_HOST (comma/space-separated) to reduce SSRF risk.
 
-const ALLOW_HOSTS = (process.env.PIPELINE_URL_ALLOW_HOST || process.env.NEXT_PUBLIC_PIPELINE_URL || "http://localhost:8010")
+const allowRaw = [
+  process.env.PIPELINE_URL_ALLOW_HOST,
+  process.env.NEXT_PUBLIC_PIPELINE_URL,
+  process.env.NEXT_PUBLIC_PIPELINE_BASE,
+  process.env.PUBLIC_BASE_URL, // for parity with python service
+  "http://localhost:8010",
+]
+  .filter(Boolean)
+  .join(" ");
+
+const ALLOW_HOSTS = allowRaw
   .split(/[\s,]+/)
   .map((s) => s.trim())
   .filter(Boolean);

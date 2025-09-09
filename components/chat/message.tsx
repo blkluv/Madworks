@@ -5,6 +5,7 @@ import { User, Bot } from "lucide-react"
 type Attachment = {
   type: 'image'
   url: string
+  href?: string
   variant?: string
 }
 
@@ -35,7 +36,7 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
       const img = attachments[0]
       return (
         <a 
-          href={img.url} 
+          href={img.href || img.url} 
           target="_blank" 
           rel="noopener noreferrer"
           className="block rounded-lg overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors relative"
@@ -43,7 +44,7 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
           <img 
             src={img.url} 
             alt="Attachment"
-            className="max-w-full h-auto block"
+            className="w-full h-48 md:h-64 lg:h-72 object-cover block"
           />
           {img.variant && (
             <span className="absolute top-2 left-2 bg-black/70 text-xs px-2 py-0.5 rounded-md border border-white/10">
@@ -58,12 +59,12 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
     return (
       <div className={cn(
         "grid gap-2",
-        count <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3"
+        count <= 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
       )}>
         {attachments.map((img, i) => (
           <a 
             key={i}
-            href={img.url} 
+            href={img.href || img.url} 
             target="_blank" 
             rel="noopener noreferrer"
             className="block rounded-md overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors relative"
@@ -71,7 +72,7 @@ export function Message({ role, content, attachments, timestamp, isGrouped = fal
             <img 
               src={img.url} 
               alt={`Attachment ${i + 1}`}
-              className="w-full h-auto block"
+              className="w-full h-28 sm:h-32 md:h-36 lg:h-40 object-cover block"
             />
             {img.variant && (
               <span className="absolute top-1.5 left-1.5 bg-black/70 text-[10px] px-1.5 py-[2px] rounded border border-white/10">

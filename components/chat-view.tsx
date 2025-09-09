@@ -17,7 +17,7 @@ interface Message {
   role: 'user' | 'assistant'
   content: string
   timestamp: string
-  attachments?: Array<{ type: string; url: string; variant?: string; label?: string; size?: string }>
+  attachments?: Array<{ type: string; url: string; href?: string; variant?: string; label?: string; size?: string }>
 }
 
 // Robust unique ID generator to avoid React key collisions when sending quickly
@@ -29,8 +29,8 @@ const uid = () => {
   return `id_${Date.now()}_${Math.random().toString(36).slice(2)}`
 }
 
-// Convert an SVG URL to a data URL so it always displays in <img>, avoiding
-// any server-side content-type or cross-origin quirks during local dev.
+// Convert an SVG URL into a data URL and inline any external raster references
+// (href/xlink:href) as data URIs so the preview always renders in <img>.
 async function toDisplayUrl(o: { url: string; format?: string }): Promise<string> {
   try {
     let u = o?.url || ""
@@ -39,19 +39,59 @@ async function toDisplayUrl(o: { url: string; format?: string }): Promise<string
     if (u.startsWith("data:")) return u
     const isSvg = fmt === "svg" || u.toLowerCase().endsWith(".svg")
     if (!isSvg) return u
-    // Use finalized URL (normalize + cache-bust + proxy if cross-origin or protocol-mismatch)
-    let fetchUrl = u
-    try { fetchUrl = finalizeUrl(u) } catch {}
-    const res = await fetch(fetchUrl, { cache: "no-store" })
-    const ct = res.headers?.get?.("content-type") || ""
-    if (!res.ok) {
-      console.warn("toDisplayUrl: fetch failed", { url: u, status: res.status, ct })
-      return o?.url
+
+    // Fetch the SVG text (direct, no proxy) with cache busting
+    const svgUrl = finalizeDirect(u)
+    const res = await fetch(svgUrl, { cache: "no-store" })
+    if (!res.ok) return svgUrl
+    let svgText = await res.text()
+
+    // Find all href/xlink:href references and inline them as data URLs
+    const hrefRe = /(xlink:href|href)\s*=\s*(["'])(.*?)\2/gi
+    const found: Array<{ full: string; attr: string; quote: string; src: string }> = []
+    svgText.replace(hrefRe, (_m, attr, quote, src) => {
+      if (src && !src.startsWith("data:")) {
+        found.push({ full: _m, attr, quote, src })
+      }
+      return _m
+    })
+
+    // Helper: blob -> data URL
+    const blobToDataUrl = (blob: Blob) => new Promise<string>((resolve, reject) => {
+      try {
+        const fr = new FileReader()
+        fr.onload = () => resolve(String(fr.result || ""))
+        fr.onerror = (e) => reject(e)
+        fr.readAsDataURL(blob)
+      } catch (e) { reject(e) }
+    })
+
+    // Minimal HTML entity decode (avoid bringing an extra dependency)
+    const decodeEntities = (s: string) =>
+      s
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+
+    for (const f of found) {
+      try {
+        // Normalize to an absolute direct URL (no proxy) for fetching.
+        // Decode HTML entities like &amp; to avoid requests like ...jpg%26t%3D...
+        const raw = decodeEntities(f.src)
+        const abs = finalizeDirect(normalizeUrl(raw))
+        const r = await fetch(abs, { cache: "no-store" })
+        if (!r.ok) continue
+        const blob = await r.blob()
+        const dataUrl = await blobToDataUrl(blob)
+        // Replace only this attribute occurrence to avoid accidental over-replace
+        const safe = f.full.replace(f.src, dataUrl)
+        svgText = svgText.replace(f.full, safe)
+      } catch {}
     }
-    const text = await res.text()
-    const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`
-    console.debug("toDisplayUrl: embedded SVG", { url: u, ct, length: text.length })
-    return encoded
+
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`
   } catch (err) {
     console.error("toDisplayUrl error", err, { url: o?.url, format: o?.format })
     return o?.url
@@ -133,6 +173,9 @@ function normalizeUrl(u: string): string {
     // If already absolute or data/blob URL after decoding, return as-is
     if (v.startsWith("http://") || v.startsWith("https://") || v.startsWith("data:") || v.startsWith("blob:")) return v
 
+    // Do NOT remap app-local routes. Keep them relative to the app origin.
+    if (v.startsWith("/api/") || v.startsWith("/_next/") || v.startsWith("/favicon") || v === "/") return v
+
     // Otherwise prefix with pipeline base
     const base = (process.env.NEXT_PUBLIC_PIPELINE_BASE || process.env.NEXT_PUBLIC_PIPELINE_URL || "http://localhost:8010").replace(/\/$/, "")
     const path = v.startsWith("/") ? v : `/${v}`
@@ -162,9 +205,9 @@ function needsProxy(u: string): boolean {
     if (typeof window === 'undefined') return false
     const loc = window.location
     const target = new URL(u, loc.href)
+    // Only proxy to avoid mixed-content (https page loading http image). Cross-origin alone is fine.
     const protocolMismatch = loc.protocol === 'https:' && target.protocol === 'http:'
-    const crossOrigin = target.origin !== loc.origin
-    return protocolMismatch || crossOrigin
+    return protocolMismatch
   } catch { return false }
 }
 
@@ -195,6 +238,25 @@ function canonical(u: string): string {
     url.searchParams.delete('cb')
     url.searchParams.delete('t')
     return `${url.origin}${url.pathname}`
+  } catch { return u }
+}
+
+// When opening in a new tab, prefer the original (de-proxied) URL so the browser renders it natively.
+function deproxyUrl(u: string): string {
+  try {
+    if (!u) return u
+    if (!u.startsWith('/api/proxy')) return u
+    const sp = new URL(u, typeof window !== 'undefined' ? window.location.href : 'http://localhost').searchParams
+    return sp.get('u') || u
+  } catch { return u }
+}
+
+// Finalize URL without using the proxy (useful for <img> src to avoid proxy edge-cases)
+function finalizeDirect(u: string): string {
+  try {
+    const abs = normalizeUrl(u)
+    if (!abs || abs.startsWith('data:')) return abs
+    return addCacheBust(abs)
   } catch { return u }
 }
 
@@ -483,33 +545,40 @@ export function ChatView() {
 
       // Build deduped image attachments per message to preserve history
       const deduped = dedupePreferredImages(json.outputs || [])
+      if (!deduped.length) {
+        try { console.warn("pipeline returned no outputs", { thumbnail: json.thumbnail_url, logs: json.logs }) } catch {}
+      }
       // Ensure SVGs are embedded as data URLs so they always render in <img>; apply proxy/bust for others
       const attProcessed = await Promise.all(
         deduped.map(async (o: any) => {
           const fmt = (o?.format || '').toLowerCase()
           const isSvg = fmt === 'svg' || (o?.url || '').toLowerCase().endsWith('.svg')
           const baseUrl = normalizeUrl(o?.url || '')
-          const url = isSvg ? await toDisplayUrl({ url: baseUrl, format: 'svg' }) : finalizeUrl(baseUrl)
+          // For image element, embed SVGs to avoid content-type/CORS quirks; for raster, prefer direct URL (no proxy) to avoid early 404s, with cache-bust.
+          const viewUrl = isSvg ? await toDisplayUrl({ url: baseUrl, format: 'svg' }) : finalizeDirect(baseUrl)
+          const href = finalizeUrl(baseUrl)
           return {
             type: 'image' as const,
-            url,
+            url: viewUrl,
+            href,
             variant: [o.variant, o.size].filter(Boolean).join(' ') || undefined,
           }
         })
       )
-      let attachments: Array<{ type: "image"; url: string; variant?: string }> = attProcessed
+      let attachments: Array<{ type: "image"; url: string; href?: string; variant?: string }> = attProcessed as any
 
       // If a thumbnail_url is provided, use it as the first preview attachment (normalized and SVG-embedded if needed)
       try {
         const thumb = (json as any)?.thumbnail_url as string | undefined
         if (thumb) {
           const normalized = normalizeUrl(thumb)
-          const previewUrl = /\.svg(\?.*)?$/i.test(normalized)
+          const previewImgUrl = /\.svg(\?.*)?$/i.test(normalized)
             ? await toDisplayUrl({ url: normalized, format: 'svg' })
             : finalizeUrl(normalized)
+          const previewHref = finalizeUrl(normalized)
           // Avoid duplicates if the same URL already exists in attachments
-          const exists = attachments.some((a) => canonical((a as any).url) === canonical(previewUrl))
-          if (!exists) attachments.unshift({ type: 'image', url: previewUrl, variant: 'preview' })
+          const exists = attachments.some((a) => canonical((a as any).href || (a as any).url) === canonical(previewHref))
+          if (!exists) attachments.unshift({ type: 'image', url: previewImgUrl, href: previewHref, variant: 'preview' })
         }
       } catch {}
       // Fallback: if no raster/SVG outputs were uploaded, embed the composed SVG directly if available
@@ -532,10 +601,10 @@ export function ChatView() {
             // Prefer to place the original image right after the preview (if present)
             const previewIndex = attachments.findIndex((a) => (a as any).variant === 'preview')
             if (previewIndex >= 0) {
-              attachments.splice(previewIndex + 1, 0, { type: 'image', url: origHref, variant: 'original' })
+              attachments.splice(previewIndex + 1, 0, { type: 'image', url: finalizeDirect(origHref), href: origHref, variant: 'original' })
             } else {
               // If no preview exists, place original at the front
-              attachments.unshift({ type: 'image', url: origHref, variant: 'original' })
+              attachments.unshift({ type: 'image', url: finalizeDirect(origHref), href: origHref, variant: 'original' })
             }
           }
         }
@@ -700,9 +769,25 @@ export function ChatView() {
     if (f && f.type.startsWith("image/")) setImageFile(f)
   }
 
+  // Measure composer height so we can pad the scroll area accordingly
+  const composerRef = useRef<HTMLDivElement>(null)
+  const [composerH, setComposerH] = useState<number>(0)
+  useEffect(() => {
+    const update = () => {
+      try { setComposerH(composerRef.current?.offsetHeight || 0) } catch {}
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
+
+  // If any assistant message contains a 'preview' attachment, switch to wide layout (hide sidebar)
+  const hasPreview = !!activeConv.messages.find((m) => m.role === 'assistant' && (m.attachments || []).some((a: any) => (a?.variant === 'preview')))
+
   return (
-    <div className="h-full min-h-0 w-full bg-transparent overflow-hidden flex pt-4 md:pt-6">
-      {/* Left: Conversations */}
+    <div className={`h-full min-h-0 w-full bg-transparent overflow-hidden flex ${hasPreview ? 'pt-0' : 'pt-4 md:pt-6'}`}>
+      {/* Left: Conversations (hidden when a preview is present for a full-width ad view) */}
+      {!hasPreview && (
       <aside className="hidden md:flex w-[220px] lg:w-[260px] flex-col">
         <div className="p-3">
           <div className="relative group isolate">
@@ -737,6 +822,7 @@ export function ChatView() {
           ))}
         </div>
       </aside>
+      )}
 
       {/* Vertical separator */}
       <div aria-hidden="true" className="hidden" />
@@ -744,8 +830,8 @@ export function ChatView() {
       {/* Right: Chat */}
       <section className="flex-1 min-h-0 flex flex-col">
         {/* Messages & Collage */}
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain chat-scrollbar w-full">
-          <div className="mx-auto max-w-3xl px-4 md:px-6 lg:px-8 py-8 pb-36 space-y-8">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain chat-scrollbar no-anchor w-full">
+          <div className={`mx-auto max-w-none px-2 md:px-4 lg:px-6 ${hasPreview ? 'py-4 space-y-4' : 'py-6 space-y-8'}`} style={{ paddingBottom: Math.max(64, composerH + 24) }}>
             {activeConv.messages.length === 0 && (
               <div className="w-full">
                 <div className="mt-2 grid grid-cols-2 gap-3 max-w-xl mx-auto">
@@ -784,19 +870,37 @@ export function ChatView() {
                     {m.attachments && m.attachments.length > 0 && (
                       <div className="mt-2 grid grid-cols-2 gap-2">
                         {m.attachments.map((a, i) => (
-                          <a key={i} href={a.url} target="_blank" rel="noreferrer" className="block">
+                          <a key={i} href={deproxyUrl((a as any).href || a.url)} target="_blank" rel="noreferrer" className="block">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={a.url}
+                              data-href={deproxyUrl((a as any).href || a.url)}
                               alt="attachment"
                               className="rounded-md border border-zinc-900/60 max-h-48 object-contain"
                               onLoad={(e) => {
                                 const img = e.currentTarget
                                 console.info("img loaded (user)", { src: img.currentSrc || img.src, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight })
                               }}
-                              onError={(e) => {
-                                const img = e.currentTarget
-                                console.error("img failed (user)", { src: img.src })
+                              onError={async (e) => {
+                                const img = e.currentTarget as HTMLImageElement
+                                try {
+                                  const tried = img.getAttribute('data-fallback') || '0'
+                                  const href = img.dataset.href || ''
+                                  if (tried === '0') {
+                                    img.setAttribute('data-fallback', '1')
+                                    img.src = deproxyUrl(href)
+                                    return
+                                  }
+                                  if (tried === '1') {
+                                    img.setAttribute('data-fallback', '2')
+                                    const res = await fetch(deproxyUrl(href), { cache: 'no-store' })
+                                    const blob = await res.blob()
+                                    const obj = URL.createObjectURL(blob)
+                                    img.src = obj
+                                    return
+                                  }
+                                } catch {}
+                                console.error('img failed (user) - giving up', { src: img.src })
                               }}
                             />
                           </a>
@@ -808,33 +912,112 @@ export function ChatView() {
               </div>
             ) : (
               <div key={m.id} className="flex justify-start">
-                <div className="relative group isolate max-w-full">
-                  <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 group-hover:opacity-10 blur-sm transition-opacity z-0"></div>
-                  <div className="relative z-10 rounded-2xl px-5 py-3.5 border bg-zinc-900/40 border-zinc-900/60">
-                    {m.content && (
-                      <div className="whitespace-pre-wrap text-zinc-200 text-[15px] mb-2">{m.content}</div>
+                <div className="relative group isolate w-full">
+                  {!m.attachments?.some((a:any)=>a?.variant==='preview') && (
+                    <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 group-hover:opacity-10 blur-sm transition-opacity z-0"></div>
+                  )}
+                  <div className={`relative z-10 rounded-2xl ${m.attachments?.some((a:any)=>a?.variant==='preview') ? 'px-0 py-0 border-none bg-transparent max-w-3xl mx-auto' : 'px-5 py-3.5 border bg-zinc-900/40 border-zinc-900/60'}`}>
+                    {m.content && !m.attachments?.some((a:any)=>a?.variant==='preview') && (
+                      <div className="whitespace-pre-wrap text-zinc-200 text-[15px] mb-2 max-w-screen-lg">{m.content}</div>
                     )}
+                    {/* When a preview exists, hide the assistant text block to avoid misalignment */}
                     {m.attachments && m.attachments.length > 0 && (
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {m.attachments.map((a, i) => (
-                          <a key={i} href={(a as any).url} target="_blank" rel="noreferrer" className="relative block group isolate">
-                            <span className="pointer-events-none absolute -inset-[2px] rounded-md bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></span>
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={(a as any).url}
-                              alt={`output ${i+1}`}
-                              className="relative z-10 rounded-md border border-zinc-900/60 bg-zinc-900/40 aspect-square object-contain group-hover:border-zinc-800"
-                              onLoad={(e) => {
-                                const img = e.currentTarget
-                                console.info("img loaded (assistant)", { src: img.currentSrc || img.src, naturalWidth: img.naturalWidth, naturalHeight: img.naturalHeight })
-                              }}
-                              onError={(e) => {
-                                const img = e.currentTarget
-                                console.error("img failed (assistant)", { src: img.src })
-                              }}
-                            />
-                          </a>
-                        ))}
+                      <div className="space-y-4">
+                        {/* Preview image - show first and larger */}
+                        {m.attachments.find(a => (a as any).variant === 'preview') && (
+                          <div className="w-full">
+                            <a 
+                              href={deproxyUrl(((m.attachments?.find(a => (a as any).variant === 'preview') as any)?.href || m.attachments?.find(a => (a as any).variant === 'preview')?.url) || '')} 
+                              target="_blank" 
+                              rel="noreferrer" 
+                              className="relative block w-full max-w-3xl mx-auto"
+                            >
+                              {/* Use processed attachment.url so SVGs are already inlined as data URLs */}
+                              {
+                                (() => {
+                                  const prev = m.attachments?.find(a => (a as any).variant === 'preview') as any
+                                  const src = (prev?.url || '') as string
+                                  return (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img
+                                      src={src}
+                                      data-href={deproxyUrl((prev?.href || prev?.url || '') as string)}
+                                      alt="Preview"
+                                      className="relative z-10 block rounded-lg w-full h-auto max-h-[58vh] object-contain bg-transparent"
+                                      onLoad={() => {
+                                        try { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) } catch {}
+                                      }}
+                                      onError={async (e) => {
+                                        const img = e.currentTarget as HTMLImageElement
+                                        try {
+                                          const tried = img.getAttribute('data-fallback') || '0'
+                                          const href = img.dataset.href || ''
+                                          if (tried === '0') { img.setAttribute('data-fallback', '1'); img.src = deproxyUrl(href); return }
+                                          if (tried === '1') {
+                                            img.setAttribute('data-fallback', '2')
+                                            const res = await fetch(deproxyUrl(href), { cache: 'no-store' })
+                                            const blob = await res.blob()
+                                            img.src = URL.createObjectURL(blob)
+                                            return
+                                          }
+                                        } catch {}
+                                      }}
+                                    />
+                                  )
+                                })()
+                              }
+                            </a>
+                          </div>
+                        )}
+                        
+                        {/* Other attachments displayed directly in a clean responsive grid */}
+                        {m.attachments.some(a => (a as any).variant !== 'preview') && (
+                          <div className="max-w-3xl mx-auto">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {m.attachments
+                                .filter(a => (a as any).variant !== 'preview')
+                                .map((a, i) => (
+                                  <a 
+                                    key={i} 
+                                    href={deproxyUrl((a as any).href || (a as any).url)} 
+                                    target="_blank" 
+                                    rel="noreferrer" 
+                                    className="block rounded-md overflow-hidden transition"
+                                  >
+                                    <div className="relative w-full aspect-[4/3] bg-transparent">
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
+                                        src={(a as any).url}
+                                        data-href={deproxyUrl((a as any).href || (a as any).url)}
+                                        alt={`${(a as any).variant || 'output'} ${i+1}`}
+                                        className="absolute inset-0 w-full h-full object-cover"
+                                        onLoad={(e) => {
+                                          const img = e.currentTarget
+                                          console.info("img loaded (assistant)", { src: img.currentSrc || img.src })
+                                        }}
+                                        onError={async (e) => {
+                                          const img = e.currentTarget as HTMLImageElement
+                                          try {
+                                            const tried = img.getAttribute('data-fallback') || '0'
+                                            const href = img.dataset.href || ''
+                                            if (tried === '0') { img.setAttribute('data-fallback', '1'); img.src = deproxyUrl(href); return }
+                                            if (tried === '1') {
+                                              img.setAttribute('data-fallback', '2')
+                                              const res = await fetch(deproxyUrl(href), { cache: 'no-store' })
+                                              const blob = await res.blob()
+                                              img.src = URL.createObjectURL(blob)
+                                              return
+                                            }
+                                          } catch {}
+                                          console.error('img failed (assistant) - giving up', { src: img.src })
+                                        }}
+                                      />
+                                    </div>
+                                  </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -864,8 +1047,8 @@ export function ChatView() {
           </div>
         </div>
 
-        {/* Composer */}
-        <div className="sticky bottom-0 z-10 p-4 pb-[env(safe-area-inset-bottom)] bg-transparent shrink-0" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+        {/* Composer (fixed to viewport bottom for stability) */}
+        <div ref={composerRef} className="fixed bottom-0 left-0 right-0 z-20 p-4 pb-[env(safe-area-inset-bottom)] bg-transparent" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
           <div className="w-full max-w-3xl mx-auto">
             <div className="mb-2 flex justify-end">
               <CreditsPill variant="inline" />

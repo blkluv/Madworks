@@ -529,9 +529,12 @@ def _sanitize_layout_variant(raw: Dict[str, Any], palette: List[str]) -> Dict[st
         allowed_styles = {"fill", "outline", "pill"}
         allowed_width_modes = {"auto", "wide"}
         allowed_panel_side = {"left", "right", "center"}
+        allowed_text_align = {"left", "center", "right"}
+        allowed_vertical_align = {"top", "middle", "bottom"}
         allowed_bg_fit = {"meet", "slice"}
         allowed_headline_fill = {"gradient", "solid"}
         allowed_panel_style = {"none", "card"}
+        allowed_emotional_mode = {"strong", "soft", "neutral"}
         pal_len = max(0, len(palette or []))
 
         # seed
@@ -574,6 +577,12 @@ def _sanitize_layout_variant(raw: Dict[str, Any], palette: List[str]) -> Dict[st
         show_scrim = _to_bool(raw.get("show_scrim"))
         if show_scrim is not None:
             out["show_scrim"] = show_scrim
+        ta = (raw.get("text_align") or "").strip().lower()
+        if ta in allowed_text_align:
+            out["text_align"] = ta
+        va = (raw.get("vertical_align") or "").strip().lower()
+        if va in allowed_vertical_align:
+            out["vertical_align"] = va
         cstyle = (raw.get("cta_style") or "").strip().lower()
         if cstyle in allowed_styles:
             out["cta_style"] = cstyle
@@ -589,6 +598,9 @@ def _sanitize_layout_variant(raw: Dict[str, Any], palette: List[str]) -> Dict[st
         pstyle = (raw.get("panel_style") or "").strip().lower()
         if pstyle in allowed_panel_style:
             out["panel_style"] = pstyle
+        emo = (raw.get("emotional_mode") or "").strip().lower()
+        if emo in allowed_emotional_mode:
+            out["emotional_mode"] = emo
 
         # accent_index
         if "accent_index" in raw:
@@ -605,6 +617,14 @@ def _sanitize_layout_variant(raw: Dict[str, Any], palette: List[str]) -> Dict[st
         # badge_text
         if "badge_text" in raw and isinstance(raw.get("badge_text"), str):
             out["badge_text"] = raw.get("badge_text")[:80]
+
+        # highlight overrides
+        if "highlight_text_color" in raw and isinstance(raw.get("highlight_text_color"), str):
+            # accept as-is; normalized later
+            out["highlight_text_color"] = raw.get("highlight_text_color")[:16]
+        hs = _clamp_float(raw.get("highlight_stroke_scale"), 0.6, 1.6, None)
+        if hs is not None:
+            out["highlight_stroke_scale"] = hs
 
         return out
     except Exception:
@@ -655,6 +675,11 @@ async def generate_layout_variant_with_ai(
             "headline_fill ('gradient'|'solid')",
             "panel_style ('none'|'card')",
             "badge_text (string <=80 chars)",
+            "text_align ('left'|'center'|'right')",
+            "vertical_align ('top'|'middle'|'bottom')",
+            "emotional_mode ('strong'|'soft'|'neutral')",
+            "highlight_text_color (hex '#rrggbb')",
+            "highlight_stroke_scale (float 0.6–1.6)",
         ]
 
         context = {
@@ -1004,7 +1029,8 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     # Layout metrics
     width = int(crop_info["width"]) if "width" in crop_info else 1080
     height = int(crop_info["height"]) if "height" in crop_info else 1080
-    padding = max(40, int(min(width, height) * 0.05))
+    # Even tighter padding to give text more room
+    padding = max(16, int(min(width, height) * 0.025))
 
     # Variation profile (seeded for deterministic diversity)
     v: Dict[str, Any] = variant or {}
@@ -1021,11 +1047,13 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     # Typography (scaled to canvas) with mild variance
     type_scale = v.get("type_scale")
     if not isinstance(type_scale, (int, float)):
-        type_scale = rng.uniform(0.94, 1.10)
-    headline_size = max(36, int(min(width, height) * 0.11 * float(type_scale)))
-    sub_size = max(18, int(min(width, height) * 0.035 * float(type_scale)))
+        type_scale = rng.uniform(0.98, 1.12)
+    # Larger base sizes, but slightly reduced to avoid crowding; auto-fit loop below will reduce if needed
+    headline_size = max(52, int(min(width, height) * 0.18 * float(type_scale)))
+    sub_size = max(24, int(min(width, height) * 0.055 * float(type_scale)))
+    # Default ALL text to white as requested
     text_color = "#ffffff"
-    text_color_secondary = "#e5e5e5"
+    text_color_secondary = "#ffffff"
 
     # Apply sanitized text color override if provided
     try:
@@ -1039,19 +1067,19 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
     # Highlight styling: contrasting fill on top of a stroke matching the base text color
     try:
-        # Allow optional override via variant
-        highlight_override = None
+        # Force highlight fill to match base text color so ALL text is white by default
+        highlight_text_color = text_color
+        # Still allow an explicit override via variant if provided and valid
         try:
             highlight_override = v.get("highlight_text_color")
+            if isinstance(highlight_override, str):
+                norm_h = _normalize_hex_color(highlight_override)
+                if norm_h:
+                    highlight_text_color = norm_h
         except Exception:
-            highlight_override = None
-        if isinstance(highlight_override, str):
-            norm_h = _normalize_hex_color(highlight_override)
-            highlight_text_color = norm_h if norm_h else _contrast_text_color(text_color)
-        else:
-            highlight_text_color = _contrast_text_color(text_color)
+            pass
     except Exception:
-        highlight_text_color = _contrast_text_color(text_color)
+        highlight_text_color = text_color
 
     # Stroke widths for highlight effect (thicker than normal text stroke)
     try:
@@ -1116,7 +1144,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     except Exception:
         pass
 
-    # Determine panel side: explicit override > smart layout > default left
+    # Determine panel side: allow smart left/right panel (distinct from centered)
     panel_side = "left"
     try:
         override = (panel_side_override or "").strip().lower() if isinstance(panel_side_override, str) else None
@@ -1135,20 +1163,17 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 cx = (float(bbox[0]) + float(bbox[2])) / 2.0
                 # Normalized horizontal position in original image
                 nx = cx / float(W0)
-                # If subject region is tiny, prefer centered layout; else choose opposite side of subject
+                # Always choose opposite side of subject so text never sits over subject
                 try:
                     w_box = max(1.0, float(bbox[2]) - float(bbox[0]))
                     h_box = max(1.0, float(bbox[3]) - float(bbox[1]))
                     area_ratio = (w_box * h_box) / float(W0 * H0)
                 except Exception:
                     area_ratio = 0.0
-                if area_ratio < 0.10:
-                    panel_side = "center"
-                else:
-                    panel_side = "right" if nx < 0.5 else "left"
+                panel_side = "right" if nx < 0.5 else "left"
             else:
-                # No subject detected; use a centered panel for better balance
-                panel_side = "center"
+                # No subject detected; default to a left text panel for a distinct layout
+                panel_side = "left"
     except Exception:
         pass
 
@@ -1165,26 +1190,40 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     # Panel width and inner text start x with variance
     panel_width_factor = v.get("panel_width_factor")
     if not isinstance(panel_width_factor, (int, float)):
+        # Choose width of the text column based on aspect ratio so it looks bold and balanced
+        aspect = float(width) / float(max(1, height))
         if panel_side == "center":
-            panel_width_factor = rng.uniform(0.70, 0.82)
+            if aspect >= 1.35:
+                panel_width_factor = 0.95  # much wider for landscape
+            elif aspect <= 0.80:
+                panel_width_factor = 0.88  # wider for portrait too
+            else:
+                panel_width_factor = 0.92  # near-square
         else:
-            panel_width_factor = rng.uniform(0.56, 0.66)
+            # For side panels, be more compact to look distinct and professional
+            panel_width_factor = rng.uniform(0.46, 0.54)
     text_panel_w = int(width * float(panel_width_factor))
+    # Compute panel x and content area based on side
     if panel_side == "left":
-        text_x = padding
+        panel_x = padding
     elif panel_side == "right":
-        text_x = width - text_panel_w + padding
-    else:  # center
-        text_x = int((width - text_panel_w) / 2) + padding
+        panel_x = max(padding, width - padding - text_panel_w)
+    else:
+        panel_x = int((width - text_panel_w) / 2)
+    # Inner content start and center
+    text_x = int(panel_x + padding)
+    # Anchor x for text rendering (center of panel for non-center layouts)
+    content_center_x = int(width / 2) if panel_side == "center" else int(panel_x + (text_panel_w / 2))
 
     # CTA sizing; final placement computed after text layout is fitted
     cta_text = copy_data.get("cta", "Learn More")
     cta_width_mode = (v.get("cta_width_mode") or "auto").lower()
-    per_char = 13 if cta_width_mode == "wide" else 11
-    cta_width = max(200, int(44 + len(cta_text) * per_char))
-    cta_height = max(52, int(min(width, height) * 0.055))
+    per_char = 14 if cta_width_mode == "wide" else 12
+    cta_width = max(240, int(48 + len(cta_text) * per_char))
+    cta_height = max(60, int(min(width, height) * 0.07))
     # placeholders; will be updated after text is fitted
-    cta_x = text_x
+    # Start CTA centered across the full canvas
+    cta_x = int((width - cta_width) / 2)
     cta_y = height - padding - cta_height
     cta_text_x = cta_x + cta_width // 2
     cta_text_y = cta_y + int(cta_height * 0.66)
@@ -1218,6 +1257,15 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     cta_radius = 10
     if cta_style == "pill":
         cta_radius = max(14, int(cta_height / 2))
+
+    # Determine text alignment within the text panel
+    try:
+        _ta = (v.get("text_align") or "").strip().lower()
+        if _ta not in ("left", "center", "right"):
+            _ta = "center"
+        text_align = _ta
+    except Exception:
+        text_align = "center"
 
     # Text wrapping (word-safe) and dynamic fitting
     # Restrict content width to the text panel area
@@ -1301,9 +1349,9 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         headline_segments = _segments_by_line(headline, headline_lines, headline_ranges)
         sub_segments = _segments_by_line(subheadline, sub_lines, sub_ranges)
 
-        # Vertical rhythm with current sizes
-        line_gap = int(headline_size * 0.28 * float(line_gap_factor))
-        sub_gap = int(sub_size * 0.24 * float(sub_gap_factor))
+        # Vertical rhythm with current sizes (slightly larger gaps to breathe)
+        line_gap = int(headline_size * 0.32 * float(line_gap_factor))
+        sub_gap = int(sub_size * 0.26 * float(sub_gap_factor))
         headline_y_start = padding + headline_size
         headline_block_h = len(headline_segments) * headline_size + max(0, (len(headline_segments) - 1) * line_gap)
         subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
@@ -1458,8 +1506,8 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             attempts += 1
             headline_size = max(30, int(headline_size * 0.94))
             sub_size = max(16, int(sub_size * 0.94))
-            line_gap = int(headline_size * 0.28 * float(line_gap_factor))
-            sub_gap = int(sub_size * 0.24 * float(sub_gap_factor))
+            line_gap = int(headline_size * 0.32 * float(line_gap_factor))
+            sub_gap = int(sub_size * 0.26 * float(sub_gap_factor))
             max_chars_headline = _measure_chars_for_width(content_width, headline_size)
             max_chars_sub = _measure_chars_for_width(content_width, sub_size)
             headline_lines = _wrap_text(headline, max_chars_headline)
@@ -1482,9 +1530,14 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
         # keep a small safe area above bottom to avoid looking pinned to the edge
         safe_bottom = height - padding - int(cta_height * 0.30)
-        # center CTA inside text panel width; clamp within bounds
-        x_cand = text_x + (content_width - cta_width) / 2.0
-        cta_x = int(max(text_x, min(x_cand, text_x + content_width - cta_width)))
+        # Position CTA horizontally based on text alignment within the text panel
+        if text_align == "left":
+            cta_x = int(text_x)
+        elif text_align == "right":
+            cta_x = int(text_x + content_width - cta_width)
+        else:
+            x_cand = text_x + (content_width - cta_width) / 2.0
+            cta_x = int(max(text_x, min(x_cand, text_x + content_width - cta_width)))
         cta_gap_scale = v.get("cta_gap_scale")
         if not isinstance(cta_gap_scale, (int, float)):
             cta_gap_scale = 1.0
@@ -1499,7 +1552,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         # Best-effort; fallback values from earlier remain
         pass
 
-    # If there is excessive vertical slack, center the text+CTA group within the safe area
+    # If there is excessive vertical slack, first try to scale UP the text to fill space, then align vertically per variant
     try:
         sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
         safe_bottom = height - padding - int(cta_height * 0.30)
@@ -1510,14 +1563,79 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         block_h = max(1, block_bottom - block_top)
         avail_h = max(1, avail_bottom - avail_top)
         slack = avail_h - block_h
+        # If plenty of slack, attempt to scale up text until we nearly fill the safe area
+        if slack > max(24, int(height * 0.08)):
+            growth_attempts = 0
+            while growth_attempts < 5:
+                growth_attempts += 1
+                # scale up modestly
+                headline_size = int(headline_size * 1.04)
+                sub_size = int(sub_size * 1.04)
+                line_gap = int(headline_size * 0.32 * float(line_gap_factor))
+                sub_gap = int(sub_size * 0.26 * float(sub_gap_factor))
+                max_chars_headline = _measure_chars_for_width(content_width, headline_size)
+                max_chars_sub = _measure_chars_for_width(content_width, sub_size)
+                headline_lines = _wrap_text(headline, max_chars_headline)
+                sub_lines = _wrap_text(subheadline, max_chars_sub)
+                headline_segments = _segments_by_line(headline, headline_lines, headline_ranges)
+                sub_segments = _segments_by_line(subheadline, sub_lines, sub_ranges)
+                headline_block_h = len(headline_segments) * headline_size + max(0, (len(headline_segments) - 1) * line_gap)
+                headline_y_start = padding + headline_size
+                subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
+                sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
+                # Recompute CTA placement directly under subheadline
+                cta_gap = max(8, int(sub_size * 0.6))
+                cta_y = subheadline_y_start + sub_block_h + cta_gap
+                cta_text_y = cta_y + int(cta_height * 0.66)
+                # Check fit
+                block_top = max(padding, headline_y_start - int(0.85 * headline_size))
+                block_bottom = max(subheadline_y_start + sub_block_h, cta_y + cta_height)
+                block_h = max(1, block_bottom - block_top)
+                if block_bottom > safe_bottom:
+                    # too big; revert last growth and stop
+                    # scale back down slightly for safety
+                    headline_size = int(headline_size / 1.06)
+                    sub_size = int(sub_size / 1.06)
+                    # re-measure with reverted sizes
+                    line_gap = int(headline_size * 0.32 * float(line_gap_factor))
+                    sub_gap = int(sub_size * 0.26 * float(sub_gap_factor))
+                    max_chars_headline = _measure_chars_for_width(content_width, headline_size)
+                    max_chars_sub = _measure_chars_for_width(content_width, sub_size)
+                    headline_lines = _wrap_text(headline, max_chars_headline)
+                    sub_lines = _wrap_text(subheadline, max_chars_sub)
+                    headline_segments = _segments_by_line(headline, headline_lines, headline_ranges)
+                    sub_segments = _segments_by_line(subheadline, sub_lines, sub_ranges)
+                    headline_block_h = len(headline_segments) * headline_size + max(0, (len(headline_segments) - 1) * line_gap)
+                    headline_y_start = padding + headline_size
+                    subheadline_y_start = headline_y_start + headline_block_h + int(headline_size * 0.45)
+                    sub_block_h = len(sub_segments) * sub_size + max(0, (len(sub_segments) - 1) * sub_gap)
+                    cta_gap = max(8, int(sub_size * 0.6))
+                    cta_y = subheadline_y_start + sub_block_h + cta_gap
+                    cta_text_y = cta_y + int(cta_height * 0.66)
+                    break
+            # refresh slack value
+            block_top = max(padding, headline_y_start - int(0.85 * headline_size))
+            block_bottom = max(subheadline_y_start + sub_block_h, cta_y + cta_height)
+            block_h = max(1, block_bottom - block_top)
+            avail_h = max(1, avail_bottom - avail_top)
+            slack = avail_h - block_h
+        # Now align the block vertically per variant preference with whatever slack remains
+        valign = str((v.get("vertical_align") or "middle")).lower()
         if slack > max(20, int(height * 0.06)):
-            target_top = avail_top + int(slack / 2)
-            delta = target_top - block_top
+            if valign == "top":
+                target_top = avail_top
+                delta = target_top - block_top
+            elif valign == "bottom":
+                target_bottom = avail_bottom
+                delta = target_bottom - block_bottom
+            else:
+                target_top = avail_top + int(slack / 2)
+                delta = target_top - block_top
             headline_y_start += int(delta)
             subheadline_y_start += int(delta)
             cta_y += int(delta)
             cta_text_y = cta_y + int(cta_height * 0.66)
-            # Clamp to bottom if needed
+            # clamp CTA within safe bottom
             if cta_y + cta_height > safe_bottom:
                 overshoot = (cta_y + cta_height) - safe_bottom
                 headline_y_start -= int(overshoot)
@@ -1531,10 +1649,11 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     try:
         def _clip(x: float, lo: float, hi: float) -> float:
             return max(lo, min(hi, x))
-        # Allow explicit enable via variant; default ON for better text legibility
-        show_scrim = bool(v.get("show_scrim", True))
+        # Respect variant flag for scrim overlays
+        show_scrim = bool(v.get("show_scrim", False))
         # Background fit behavior for <image>: 'meet' (no crop, may letterbox) or 'slice' (cover, may crop)
-        bg_fit = str(v.get("bg_fit", "meet")).lower()
+        # Default to 'slice' for a bold, modern full-bleed look
+        bg_fit = str(v.get("bg_fit", "slice")).lower()
         if bg_fit not in ("meet", "slice"):
             bg_fit = "meet"
         preserve_mode = f"xMidYMid {'slice' if bg_fit == 'slice' else 'meet'}"
@@ -1551,15 +1670,17 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             side_shade_factor = rng.uniform(0.9, 1.2)
         side_shade_opacity = _clip(0.48 * float(side_shade_factor), 0.32, 0.62)
 
-        # Prompt-influenced image filter variance
+        # Prompt-influenced image filter variance (override with emotional_mode variant if provided)
         prompt_text = f"{copy_data.get('headline','')} {copy_data.get('subheadline','')}".lower()
         strong_keywords = ["bold", "sale", "deal", "new", "limited", "fitness", "energy", "power", "high", "premium"]
         soft_keywords = ["calm", "eco", "natural", "gentle", "soft", "soothing", "minimal", "organic"]
-        mode = "neutral"
-        if any(k in prompt_text for k in strong_keywords):
-            mode = "strong"
-        elif any(k in prompt_text for k in soft_keywords):
-            mode = "soft"
+        mode = str((v.get("emotional_mode") or "")).lower()
+        if mode not in ("strong", "soft", "neutral"):
+            mode = "neutral"
+            if any(k in prompt_text for k in strong_keywords):
+                mode = "strong"
+            elif any(k in prompt_text for k in soft_keywords):
+                mode = "soft"
 
         if mode == "strong":
             contrast = _clip(rng.uniform(1.15, 1.35), 0.7, 1.6)
@@ -1647,8 +1768,12 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
     # Optional visual styles via variant
     try:
-        headline_fill = str(v.get("headline_fill", "gradient")).lower()
-        panel_style = str(v.get("panel_style", "none")).lower()
+        # Default to solid; allow variant to override to gradient
+        requested_headline_fill = str(v.get("headline_fill", "solid")).lower()
+        headline_fill = requested_headline_fill if requested_headline_fill in ("solid", "gradient") else "solid"
+        # Panel style: allow 'card' overlay if requested
+        _requested_panel_style = str(v.get("panel_style", "none")).lower()
+        panel_style = _requested_panel_style if _requested_panel_style in ("none", "card") else "none"
     except Exception:
         headline_fill = "gradient"
         panel_style = "none"
@@ -1689,6 +1814,21 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
     except Exception:
         pass
 
+    # Map text alignment to SVG text-anchor and anchor X position
+    try:
+        if text_align == "left":
+            text_anchor_attr = "start"
+            anchor_x = int(text_x)
+        elif text_align == "right":
+            text_anchor_attr = "end"
+            anchor_x = int(text_x + content_width)
+        else:
+            text_anchor_attr = "middle"
+            anchor_x = int(content_center_x)
+    except Exception:
+        text_anchor_attr = "middle"
+        anchor_x = int(content_center_x)
+
     svg_template = """
     <svg width="{{ width }}" height="{{ height }}" viewBox="0 0 {{ width }} {{ height }}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
         <defs>
@@ -1723,7 +1863,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 <feColorMatrix type="saturate" values="{{ img_saturate }}" />
             </filter>
             <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
-                <feDropShadow dx="2" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.45"/>
+                <feDropShadow dx="2" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.28"/>
             </filter>
             <filter id="textGlow" x="-50%" y="-50%" width="200%" height="200%">
                 <feGaussianBlur stdDeviation="2" result="blur" />
@@ -1732,6 +1872,18 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                     <feMergeNode in="SourceGraphic" />
                 </feMerge>
             </filter>
+            <!-- Professional bottom-left vignette: stronger at the corner, quick falloff -->
+            <radialGradient id="vignetteBL" cx="0%" cy="100%" r="68%" fx="0%" fy="100%" gradientTransform="matrix(1 0 0 0.72 0 0)">
+                <stop offset="0%" stop-color="#000000" stop-opacity="0.42" />
+                <stop offset="38%" stop-color="#000000" stop-opacity="0.24" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
+            </radialGradient>
+            <!-- Inner accent vignette for a two-tone professional corner -->
+            <radialGradient id="vignetteBL2" cx="0%" cy="100%" r="42%" fx="0%" fy="100%" gradientTransform="matrix(1 0 0 0.58 0 0)">
+                <stop offset="0%" stop-color="#000000" stop-opacity="0.55" />
+                <stop offset="30%" stop-color="#000000" stop-opacity="0.28" />
+                <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
+            </radialGradient>
         </defs>
 
         <!-- Background -->
@@ -1741,6 +1893,9 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         <!-- Optional legibility gradient overlay -->
         <rect width="100%" height="100%" fill="url(#shade)" />
         {% endif %}
+        <!-- Always apply bottom-left vignettes for a professional, legible finish -->
+        <rect width="100%" height="100%" fill="url(#vignetteBL)" />
+        <rect width="100%" height="100%" fill="url(#vignetteBL2)" />
         {% else %}
         <rect width="100%" height="100%" fill="url(#bg)" />
         {% endif %}
@@ -1760,7 +1915,9 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             
             {% if panel_style == 'card' %}
             <!-- Card background behind text for legibility -->
-            <rect x="{{ panel_card_x }}" y="{{ panel_card_y }}" width="{{ panel_card_w }}" height="{{ panel_card_h }}" rx="{{ panel_card_radius }}" fill="#000000" fill-opacity="0.28" />
+            <g filter="url(#shadow)">
+                <rect x="{{ panel_card_x }}" y="{{ panel_card_y }}" width="{{ panel_card_w }}" height="{{ panel_card_h }}" rx="{{ panel_card_radius }}" fill="#0b0b0b" fill-opacity="0.55" />
+            </g>
             {% endif %}
 
             {% if badge_text %}
@@ -1770,10 +1927,10 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 <text x="{{ badge_x + badge_w/2 }}" y="{{ badge_y + badge_h*0.68 }}" font-family="{{ font_family_headline | e }}" font-size="{{ int(sub_size*0.85) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ badge_text | e }}</text>
             </g>
             {% endif %}
-            <!-- Headline with emphasis tspans (supports 'highlight' style) -->
-            <text x="{{ text_x }}" y="{{ headline_y_start }}" font-family="{{ font_family_headline | e }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{% if headline_fill == 'gradient' %}url(#headlineGrad){% else %}{{ text_color }}{% endif %}" letter-spacing="{{ headline_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.25" stroke-width="{{ headline_stroke_w }}">
+            <!-- Headline within text panel -->
+            <text x="{{ anchor_x }}" y="{{ headline_y_start }}" text-anchor="{{ text_anchor_attr }}" font-family="{{ font_family_headline | e }}" font-size="{{ headline_size }}" font-weight="{{ headline_weight }}" fill="{% if headline_fill == 'gradient' %}url(#headlineGrad){% else %}{{ text_color }}{% endif %}" letter-spacing="{{ headline_letter_spacing }}" paint-order="fill" stroke="none">
                 {% for line in headline_segments %}
-                <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">
+                <tspan x="{{ anchor_x }}" dy="{% if loop.first %}0{% else %}{{ headline_size + line_gap }}{% endif %}">
                     {% for seg in line %}
                     <tspan{% if seg.style == 'bold' %} font-weight="800"{% elif seg.style == 'italic' %} font-style="italic"{% endif %}{% if seg.style == 'highlight' %} fill="{{ highlight_text_color }}" stroke="{{ headline_highlight_stroke }}" stroke-width="{{ headline_highlight_stroke_w }}" stroke-opacity="1" paint-order="stroke fill" stroke-linejoin="round" stroke-linecap="round"{% endif %}>{{ (seg.text | upper if seg.style == 'caps' else seg.text) | e }}</tspan>
                     {% endfor %}
@@ -1781,10 +1938,10 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 {% endfor %}
             </text>
 
-            <!-- Subheadline (supports 'highlight' style) -->
-            <text x="{{ text_x }}" y="{{ subheadline_y_start }}" font-family="{{ font_family_body | e }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" filter="url(#shadow)" paint-order="stroke fill" stroke="#000000" stroke-opacity="0.18" stroke-width="{{ sub_stroke_w }}">
+            <!-- Subheadline within text panel -->
+            <text x="{{ anchor_x }}" y="{{ subheadline_y_start }}" text-anchor="{{ text_anchor_attr }}" font-family="{{ font_family_body | e }}" font-size="{{ sub_size }}" font-weight="{{ body_weight }}" fill="{{ text_color_secondary }}" letter-spacing="{{ body_letter_spacing }}" paint-order="fill" stroke="none">
                 {% for line in sub_segments %}
-                <tspan x="{{ text_x }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">
+                <tspan x="{{ anchor_x }}" dy="{% if loop.first %}0{% else %}{{ sub_size + sub_gap }}{% endif %}">
                     {% for seg in line %}
                     <tspan{% if seg.style == 'bold' %} font-weight="700"{% elif seg.style == 'italic' %} font-style="italic"{% endif %}{% if seg.style == 'highlight' %} fill="{{ highlight_text_color }}" stroke="{{ sub_highlight_stroke }}" stroke-width="{{ sub_highlight_stroke_w }}" stroke-opacity="1" paint-order="stroke fill" stroke-linejoin="round" stroke-linecap="round"{% endif %}>{{ (seg.text | upper if seg.style == 'caps' else seg.text) | e }}</tspan>
                     {% endfor %}
@@ -1792,9 +1949,9 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 {% endfor %}
             </text>
 
-            <!-- CTA Button -->
+            <!-- CTA Button centered within text panel -->
             <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="{{ cta_radius }}" fill="{{ cta_fill }}" filter="url(#shadow)" stroke="{{ cta_stroke }}" stroke-opacity="{{ cta_stroke_opacity }}"/>
-            <text x="{{ cta_text_x }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline | e }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta | upper | e }}</text>
+            <text x="{{ cta_x + (cta_width/2) }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline | e }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta | upper | e }}</text>
         </g>
     </svg>
     """
@@ -1852,6 +2009,9 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         shade_end_opacity=shade_end_opacity,
         side_shade_opacity=side_shade_opacity,
         center_x=center_x,
+        content_center_x=content_center_x,
+        text_anchor_attr=text_anchor_attr,
+        anchor_x=anchor_x,
         show_scrim=show_scrim,
         # image filter vars
         img_slope=img_slope,
@@ -1883,6 +2043,205 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         int=int,
     )
     return svg_content
+
+# Curated catalog of modern ad layout variants
+def modern_variant_catalog(copy_data: Dict[str, Any], analysis: Dict[str, Any], crop_info: Dict[str, Any], *, base_seed: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Return a curated list of modern ad variant presets. Each item has keys: id, name, variant."""
+    palette = analysis.get("palette") or []
+    pal_n = len(palette)
+    def acc(i: int) -> int:
+        return max(0, min(max(0, pal_n - 1), i))
+    badge_text = (copy_data.get("badge") or "").strip()
+    presets: List[Dict[str, Any]] = []
+    def add(id_: str, name: str, v: Dict[str, Any]):
+        presets.append({"id": id_, "name": name, "variant": v})
+
+    # 1) Hero left, text right with scrim + card (bold retail/performance)
+    add("hero_left_text_right_card", "Hero Left · Right Text · Card", {
+        "panel_side": "right",
+        "text_align": "left",
+        "show_scrim": True,
+        "panel_style": "card",
+        "headline_fill": "solid",
+        "cta_style": "pill",
+        "cta_width_mode": "wide",
+        "bg_fit": "slice",
+        "vertical_align": "middle",
+        "emotional_mode": "strong",
+        "accent_index": acc(1),
+        "type_scale": 1.06,
+        "panel_width_factor": 0.50,
+    })
+
+    # 2) Hero right, text left with scrim (brand storytelling)
+    add("hero_right_text_left_scrim", "Hero Right · Left Text · Scrim", {
+        "panel_side": "left",
+        "text_align": "left",
+        "show_scrim": True,
+        "panel_style": "none",
+        "headline_fill": "solid",
+        "cta_style": "fill",
+        "cta_width_mode": "auto",
+        "bg_fit": "slice",
+        "vertical_align": "middle",
+        "emotional_mode": "neutral",
+        "accent_index": acc(2),
+        "type_scale": 1.02,
+        "panel_width_factor": 0.52,
+    })
+
+    # 3) Centered minimal gradient headline (premium aesthetic)
+    add("centered_minimal_gradient", "Centered Minimal · Gradient Headline", {
+        "panel_side": "center",
+        "text_align": "center",
+        "show_scrim": False,
+        "panel_style": "none",
+        "headline_fill": "gradient",
+        "cta_style": "pill",
+        "cta_width_mode": "auto",
+        "bg_fit": "slice",
+        "vertical_align": "middle",
+        "emotional_mode": "neutral",
+        "accent_index": acc(1),
+        "type_scale": 1.08,
+        "panel_width_factor": 0.92,
+    })
+
+    # 4) Top-aligned info (editorial feel)
+    add("top_left_editorial", "Top Left · Editorial", {
+        "panel_side": "left",
+        "text_align": "left",
+        "show_scrim": False,
+        "panel_style": "none",
+        "headline_fill": "solid",
+        "cta_style": "outline",
+        "cta_width_mode": "auto",
+        "bg_fit": "slice",
+        "vertical_align": "top",
+        "emotional_mode": "neutral",
+        "accent_index": acc(3 if pal_n > 3 else 1),
+        "type_scale": 0.96,
+        "panel_width_factor": 0.48,
+        "line_gap_factor": 1.12,
+        "sub_gap_factor": 1.08,
+    })
+
+    # 5) Bottom-right bold (promotional)
+    add("bottom_right_bold", "Bottom Right · Bold", {
+        "panel_side": "right",
+        "text_align": "right",
+        "show_scrim": True,
+        "panel_style": "none",
+        "headline_fill": "solid",
+        "cta_style": "pill",
+        "cta_width_mode": "wide",
+        "bg_fit": "slice",
+        "vertical_align": "bottom",
+        "emotional_mode": "strong",
+        "accent_index": acc(0),
+        "type_scale": 1.10,
+        "panel_width_factor": 0.50,
+    })
+
+    # 6) Badge announcement (launch/new)
+    add("badge_announcement", "Centered · Badge Announcement", {
+        "panel_side": "center",
+        "text_align": "center",
+        "show_scrim": False,
+        "panel_style": "none",
+        "headline_fill": "solid",
+        "cta_style": "fill",
+        "cta_width_mode": "auto",
+        "bg_fit": "slice",
+        "vertical_align": "middle",
+        "emotional_mode": "strong",
+        "accent_index": acc(2),
+        "badge_text": badge_text[:80] if badge_text else "",
+        "type_scale": 1.04,
+        "panel_width_factor": 0.88,
+    })
+
+    # 7) Soft eco/minimal (wellness/eco brands)
+    add("soft_eco_minimal", "Soft Eco · Minimal", {
+        "panel_side": "center",
+        "text_align": "center",
+        "show_scrim": True,
+        "panel_style": "none",
+        "headline_fill": "solid",
+        "cta_style": "outline",
+        "cta_width_mode": "auto",
+        "bg_fit": "meet",
+        "vertical_align": "middle",
+        "emotional_mode": "soft",
+        "accent_index": acc(1),
+        "type_scale": 1.00,
+        "shade_factor": 0.70,
+        "side_shade_factor": 0.70,
+        "panel_width_factor": 0.90,
+    })
+
+    # 8) Product card overlay with meet-fit (catalog/product highlight)
+    add("product_card_meet", "Product Card · Meet Fit", {
+        "panel_side": "left",
+        "text_align": "left",
+        "show_scrim": False,
+        "panel_style": "card",
+        "headline_fill": "solid",
+        "cta_style": "fill",
+        "cta_width_mode": "auto",
+        "bg_fit": "meet",
+        "vertical_align": "middle",
+        "emotional_mode": "neutral",
+        "accent_index": acc(2),
+        "type_scale": 1.00,
+        "panel_width_factor": 0.50,
+    })
+
+    # 9) Centered wide CTA
+    add("centered_wide_cta", "Centered · Wide CTA", {
+        "panel_side": "center",
+        "text_align": "center",
+        "show_scrim": False,
+        "panel_style": "none",
+        "headline_fill": "solid",
+        "cta_style": "pill",
+        "cta_width_mode": "wide",
+        "bg_fit": "slice",
+        "vertical_align": "middle",
+        "emotional_mode": "neutral",
+        "accent_index": acc(0),
+        "type_scale": 1.02,
+        "panel_width_factor": 0.90,
+    })
+
+    # 10) Smart flip (let smart_layout decide, but flip for variety)
+    add("smart_flip_rhythm", "Smart Flip · Rhythm", {
+        "flip_panel": True,
+        "text_align": "left",
+        "show_scrim": True,
+        "panel_style": "none",
+        "headline_fill": "solid",
+        "cta_style": "fill",
+        "cta_width_mode": "auto",
+        "bg_fit": "slice",
+        "vertical_align": "middle",
+        "emotional_mode": "neutral",
+        "accent_index": acc(1),
+        "type_scale": 1.00,
+        "line_gap_factor": 1.00,
+        "sub_gap_factor": 1.00,
+    })
+
+    # Attach seeds deterministically
+    for i, p in enumerate(presets):
+        v = dict(p["variant"])
+        try:
+            if base_seed is not None:
+                v.setdefault("seed", int(base_seed) + i)
+        except Exception:
+            pass
+        p["variant"] = v
+    return presets
 
 def public_base_url() -> str:
     return os.getenv('PUBLIC_MINIO_BASE', 'http://localhost:9000').rstrip('/')
@@ -2456,6 +2815,17 @@ async def compose_variants(payload: Dict[str, Any]):
         if not isinstance(base_variant, dict):
             base_variant = {}
         base_seed = payload.get("variant_seed")
+        # Optional catalog mode: when true or when catalog == 'modern', return curated presets
+        use_catalog = False
+        catalog_name = None
+        try:
+            if isinstance(payload.get("catalog"), bool):
+                use_catalog = bool(payload.get("catalog"))
+            elif isinstance(payload.get("catalog"), str):
+                catalog_name = (payload.get("catalog") or "").strip().lower() or None
+                use_catalog = catalog_name in ("modern", "all", "presets")
+        except Exception:
+            use_catalog = False
 
         # Deterministic base from copy
         try:
@@ -2465,52 +2835,85 @@ async def compose_variants(payload: Dict[str, Any]):
             copy_seed = random.randint(0, 2**31 - 1)
 
         compositions = []
-        styles = ["fill", "outline", "pill"]
-        width_modes = ["auto", "wide"]
-        for i in range(count):
-            v = dict(base_variant)
-            # Seed strategy: user-provided or deterministic from copy + index
-            if "seed" not in v:
-                try:
-                    if base_seed is not None:
-                        v["seed"] = int(base_seed) + i
-                    else:
-                        v["seed"] = int(copy_seed) + i * 101
-                except Exception:
-                    v["seed"] = random.randint(0, 2**31 - 1)
-            # Ensure some toggles vary across variants
-            v.setdefault("cta_style", styles[i % len(styles)])
-            v.setdefault("cta_width_mode", width_modes[i % len(width_modes)])
-            # Alternate panel flip occasionally if not explicitly forced
-            if "panel_side" not in v:
-                v.setdefault("flip_panel", bool(i % 2))
+        if use_catalog:
+            # Use curated catalog (modern) presets
+            presets = modern_variant_catalog(copy_data, analysis, crop_info, base_seed=(int(base_seed) if base_seed is not None else int(copy_seed)))
+            for i, preset in enumerate(presets):
+                v = {**base_variant, **(preset.get("variant") or {})}
+                # Optionally enrich each variant with GPT layout overrides (cached)
+                if USE_GPT_LAYOUT:
+                    try:
+                        gpt_v = await get_gpt_layout_variant_cached(copy_data, analysis, crop_info, base_variant=v)
+                        if gpt_v:
+                            v.update(gpt_v)
+                    except Exception as _e:
+                        logger.warning(f"GPT layout skipped for preset {preset.get('id')}: {_e}")
 
-            # Optionally enrich each variant with GPT layout overrides (cached)
-            if USE_GPT_LAYOUT:
-                try:
-                    gpt_v = await get_gpt_layout_variant_cached(copy_data, analysis, crop_info, base_variant=v)
-                    if gpt_v:
-                        v.update(gpt_v)
-                except Exception as _e:
-                    logger.warning(f"GPT layout skipped for variant {i}: {_e}")
+                svg = create_svg_composition(
+                    copy_data,
+                    analysis,
+                    crop_info,
+                    smart_layout=bool(payload.get("smart_layout", True)),
+                    panel_side_override=(payload.get("panel_side") or None),
+                    text_color_override=_normalize_hex_color(payload.get("text_color_override")) if isinstance(payload.get("text_color_override"), str) else None,
+                    variant=v,
+                )
+                composition_id = f"comp_{hash(svg) % 1000000}_{i}"
+                compositions.append({
+                    "composition_id": composition_id,
+                    "svg": svg,
+                    "variant_used": v,
+                    "preset_id": preset.get("id"),
+                    "preset_name": preset.get("name"),
+                })
+            return {"compositions": compositions, "catalog": (catalog_name or "modern"), "count": len(compositions)}
+        else:
+            styles = ["fill", "outline", "pill"]
+            width_modes = ["auto", "wide"]
+            for i in range(count):
+                v = dict(base_variant)
+                # Seed strategy: user-provided or deterministic from copy + index
+                if "seed" not in v:
+                    try:
+                        if base_seed is not None:
+                            v["seed"] = int(base_seed) + i
+                        else:
+                            v["seed"] = int(copy_seed) + i * 101
+                    except Exception:
+                        v["seed"] = random.randint(0, 2**31 - 1)
+                # Ensure some toggles vary across variants
+                v.setdefault("cta_style", styles[i % len(styles)])
+                v.setdefault("cta_width_mode", width_modes[i % len(width_modes)])
+                # Alternate panel flip occasionally if not explicitly forced
+                if "panel_side" not in v:
+                    v.setdefault("flip_panel", bool(i % 2))
 
-            svg = create_svg_composition(
-                copy_data,
-                analysis,
-                crop_info,
-                smart_layout=bool(payload.get("smart_layout", True)),
-                panel_side_override=(payload.get("panel_side") or None),
-                text_color_override=_normalize_hex_color(payload.get("text_color_override")) if isinstance(payload.get("text_color_override"), str) else None,
-                variant=v,
-            )
-            composition_id = f"comp_{hash(svg) % 1000000}_{i}"
-            compositions.append({
-                "composition_id": composition_id,
-                "svg": svg,
-                "variant_used": v,
-            })
+                # Optionally enrich each variant with GPT layout overrides (cached)
+                if USE_GPT_LAYOUT:
+                    try:
+                        gpt_v = await get_gpt_layout_variant_cached(copy_data, analysis, crop_info, base_variant=v)
+                        if gpt_v:
+                            v.update(gpt_v)
+                    except Exception as _e:
+                        logger.warning(f"GPT layout skipped for variant {i}: {_e}")
 
-        return {"compositions": compositions, "count": len(compositions)}
+                svg = create_svg_composition(
+                    copy_data,
+                    analysis,
+                    crop_info,
+                    smart_layout=bool(payload.get("smart_layout", True)),
+                    panel_side_override=(payload.get("panel_side") or None),
+                    text_color_override=_normalize_hex_color(payload.get("text_color_override")) if isinstance(payload.get("text_color_override"), str) else None,
+                    variant=v,
+                )
+                composition_id = f"comp_{hash(svg) % 1000000}_{i}"
+                compositions.append({
+                    "composition_id": composition_id,
+                    "svg": svg,
+                    "variant_used": v,
+                })
+
+            return {"compositions": compositions, "count": len(compositions)}
     except Exception as e:
         logger.error(f"Error in compose_variants: {e}")
         raise HTTPException(status_code=500, detail=str(e))
