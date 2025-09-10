@@ -1651,6 +1651,19 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             return max(lo, min(hi, x))
         # Respect variant flag for scrim overlays
         show_scrim = bool(v.get("show_scrim", False))
+        # Bottom-left vignette (corner shadow) toggle and strength
+        try:
+            _vig_enable = v.get("corner_shadow_bl")
+            show_corner_vignette_bl = bool(_vig_enable) if isinstance(_vig_enable, (bool, int, float)) else False
+        except Exception:
+            show_corner_vignette_bl = False
+        try:
+            _vig_strength = v.get("corner_shadow_strength")
+            corner_shadow_strength = _clamp_float(_vig_strength, 0.0, 2.0, 1.0)
+            if corner_shadow_strength is None:
+                corner_shadow_strength = 1.0
+        except Exception:
+            corner_shadow_strength = 1.0
         # Background fit behavior for <image>: 'meet' (no crop, may letterbox) or 'slice' (cover, may crop)
         # Default to 'slice' for a bold, modern full-bleed look
         bg_fit = str(v.get("bg_fit", "slice")).lower()
@@ -1669,6 +1682,12 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         if not isinstance(side_shade_factor, (int, float)):
             side_shade_factor = rng.uniform(0.9, 1.2)
         side_shade_opacity = _clip(0.48 * float(side_shade_factor), 0.32, 0.62)
+
+        # Compute vignette opacities scaled by strength (applies only if enabled)
+        vig1_main_opacity = _clip(0.42 * float(corner_shadow_strength), 0.0, 0.95)
+        vig1_mid_opacity = _clip(0.24 * float(corner_shadow_strength), 0.0, 0.85)
+        vig2_main_opacity = _clip(0.55 * float(corner_shadow_strength), 0.0, 0.95)
+        vig2_mid_opacity = _clip(0.28 * float(corner_shadow_strength), 0.0, 0.90)
 
         # Prompt-influenced image filter variance (override with emotional_mode variant if provided)
         prompt_text = f"{copy_data.get('headline','')} {copy_data.get('subheadline','')}".lower()
@@ -1701,10 +1720,15 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         img_saturate = float(saturate)
     except Exception:
         show_scrim = False
+        show_corner_vignette_bl = False
         # Fallbacks to safe defaults
         shade_main_opacity, shade_mid_opacity, shade_end_opacity, side_shade_opacity = 0.28, 0.16, 0.06, 0.50
         img_slope, img_intercept, img_saturate = 1.0, 0.0, 1.0
         preserve_mode = "xMidYMid slice"
+        vig1_main_opacity = 0.0
+        vig1_mid_opacity = 0.0
+        vig2_main_opacity = 0.0
+        vig2_mid_opacity = 0.0
     try:
         # If CTA still lands in bottom gutter, lift text block and CTA together
         bottom_gutter = int(height * 0.12)
@@ -1874,14 +1898,14 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
             </filter>
             <!-- Professional bottom-left vignette: stronger at the corner, quick falloff -->
             <radialGradient id="vignetteBL" cx="0%" cy="100%" r="68%" fx="0%" fy="100%" gradientTransform="matrix(1 0 0 0.72 0 0)">
-                <stop offset="0%" stop-color="#000000" stop-opacity="0.42" />
-                <stop offset="38%" stop-color="#000000" stop-opacity="0.24" />
+                <stop offset="0%" stop-color="#000000" stop-opacity="{{ vig1_main_opacity }}" />
+                <stop offset="38%" stop-color="#000000" stop-opacity="{{ vig1_mid_opacity }}" />
                 <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
             </radialGradient>
             <!-- Inner accent vignette for a two-tone professional corner -->
             <radialGradient id="vignetteBL2" cx="0%" cy="100%" r="42%" fx="0%" fy="100%" gradientTransform="matrix(1 0 0 0.58 0 0)">
-                <stop offset="0%" stop-color="#000000" stop-opacity="0.55" />
-                <stop offset="30%" stop-color="#000000" stop-opacity="0.28" />
+                <stop offset="0%" stop-color="#000000" stop-opacity="{{ vig2_main_opacity }}" />
+                <stop offset="30%" stop-color="#000000" stop-opacity="{{ vig2_mid_opacity }}" />
                 <stop offset="100%" stop-color="#000000" stop-opacity="0.00" />
             </radialGradient>
         </defs>
@@ -1893,9 +1917,11 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         <!-- Optional legibility gradient overlay -->
         <rect width="100%" height="100%" fill="url(#shade)" />
         {% endif %}
-        <!-- Always apply bottom-left vignettes for a professional, legible finish -->
+        {% if show_corner_vignette_bl %}
+        <!-- Optional bottom-left corner vignette for emphasis/legibility (variant-controlled) -->
         <rect width="100%" height="100%" fill="url(#vignetteBL)" />
         <rect width="100%" height="100%" fill="url(#vignetteBL2)" />
+        {% endif %}
         {% else %}
         <rect width="100%" height="100%" fill="url(#bg)" />
         {% endif %}
@@ -2008,6 +2034,12 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         shade_mid_opacity=shade_mid_opacity,
         shade_end_opacity=shade_end_opacity,
         side_shade_opacity=side_shade_opacity,
+        # corner vignette vars
+        show_corner_vignette_bl=show_corner_vignette_bl,
+        vig1_main_opacity=vig1_main_opacity,
+        vig1_mid_opacity=vig1_mid_opacity,
+        vig2_main_opacity=vig2_main_opacity,
+        vig2_mid_opacity=vig2_mid_opacity,
         center_x=center_x,
         content_center_x=content_center_x,
         text_anchor_attr=text_anchor_attr,

@@ -282,7 +282,7 @@ export function ChatView() {
   const [selectedAspectRatio, setSelectedAspectRatio] = useState("1:1")
   const [platform, setPlatform] = useState<"" | "instagram" | "facebook" | "linkedin" | "x">("")
   const [tone, setTone] = useState<"" | "bold" | "friendly" | "professional" | "minimal">("")
-  const [variants, setVariants] = useState<number>(3)
+  // Removed variants selection (always generate 3 fixed presets server-side)
   const [textColorOverride, setTextColorOverride] = useState<string>("")
   const [recommendation, setRecommendation] = useState<{
     headline: string
@@ -303,16 +303,16 @@ export function ChatView() {
     return a
   }
 
-  const suggestions: Array<{ label: string; text: string; preset?: { platform?: string; tone?: string; aspect?: string; variants?: number } }> = [
+  const suggestions: Array<{ label: string; text: string; preset?: { platform?: string; tone?: string; aspect?: string } }> = [
     {
       label: "Stories variants",
       text: "Try a few bold, high-contrast Story options. Keep headlines punchy and legible.",
-      preset: { platform: "instagram", tone: "bold", aspect: "9:16", variants: 5 },
+      preset: { platform: "instagram", tone: "bold", aspect: "9:16" },
     },
     {
       label: "Credible LinkedIn",
       text: "Professional, concise tone. Suggest a clean layout and clear CTA.",
-      preset: { platform: "linkedin", tone: "professional", aspect: "1:1", variants: 3 },
+      preset: { platform: "linkedin", tone: "professional", aspect: "1:1" },
     },
     {
       label: "Seasonal promo",
@@ -329,12 +329,12 @@ export function ChatView() {
     {
       label: "Bold contrast",
       text: "High contrast type, large CTA. Emphasize readability over flourish.",
-      preset: { platform: "instagram", tone: "bold", aspect: "1:1", variants: 3 },
+      preset: { platform: "instagram", tone: "bold", aspect: "1:1" },
     },
     {
       label: "Minimalist",
       text: "Sparse copy, plenty of negative space, one strong accent color.",
-      preset: { tone: "minimal", aspect: "4:5", variants: 3 },
+      preset: { tone: "minimal", aspect: "4:5" },
     },
   ]
 
@@ -506,7 +506,6 @@ export function ChatView() {
       } catch {}
       if (platform) form.append("platform", platform)
       if (tone) form.append("tone", tone)
-      form.append("num_variants", String(variants || 1))
       try { form.append("sizes", JSON.stringify(sizesForAspect(selectedAspectRatio))) } catch {}
       if (textColorOverride && textColorOverride.trim()) form.append("text_color_override", textColorOverride.trim())
 
@@ -844,7 +843,7 @@ export function ChatView() {
                           if (s.preset.platform) setPlatform(s.preset.platform as any)
                           if (s.preset.tone) setTone(s.preset.tone as any)
                           if (s.preset.aspect) setSelectedAspectRatio(s.preset.aspect)
-                          if (s.preset.variants) setVariants(s.preset.variants)
+                          // variants count removed
                         }
                         applySuggestion(s.text)
                       }}
@@ -1068,16 +1067,6 @@ export function ChatView() {
               <ToggleGroupItem value="professional" aria-label="Professional" className="px-2 text-xs">P</ToggleGroupItem>
               <ToggleGroupItem value="minimal" aria-label="Minimal" className="px-2 text-xs">M</ToggleGroupItem>
             </ToggleGroup>
-            <Select value={String(variants)} onValueChange={(v) => setVariants(Number(v || 3))}>
-              <SelectTrigger className="bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-900 rounded-md h-8 px-2 text-xs">
-                <SelectValue placeholder="Variants" />
-              </SelectTrigger>
-              <SelectContent className="bg-zinc-950 border border-zinc-900 text-zinc-200">
-                <SelectItem value="1" className="text-zinc-200 focus:bg-zinc-900">1 variant</SelectItem>
-                <SelectItem value="3" className="text-zinc-200 focus:bg-zinc-900">3 variants (recommended)</SelectItem>
-                <SelectItem value="5" className="text-zinc-200 focus:bg-zinc-900">5 variants</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
           )}
 
@@ -1126,16 +1115,17 @@ export function ChatView() {
                       <PopoverTrigger asChild>
                         <button
                           type="button"
-                          className="relative w-12 h-12 rounded-full bg-zinc-900/70 hover:bg-zinc-900 text-zinc-200 border border-zinc-700/60 flex items-center justify-center shadow-[0_0_22px_rgba(236,72,153,0.25)]"
-                          title="Preferences"
+                          className="relative h-12 rounded-full bg-zinc-900/70 hover:bg-zinc-900 text-zinc-200 border border-zinc-700/60 flex items-center justify-center px-4 gap-2 shadow-[0_0_22px_rgba(236,72,153,0.25)]"
+                          title="Options"
                         >
-                          <SlidersHorizontal className="w-5 h-5" />
+                          <SlidersHorizontal className="w-4 h-4" />
+                          <span className="text-sm font-medium">Options</span>
                         </button>
                       </PopoverTrigger>
                       <PopoverContent align="end" className="w-80 bg-zinc-950 border-zinc-900 text-zinc-200">
                         <div className="space-y-3">
                           <div>
-                            <div className="text-xs text-zinc-400 mb-1">Platform</div>
+                            <div className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1">Platform</div>
                             <ToggleGroup type="single" value={platform} onValueChange={(v) => setPlatform((v as any) || "") } className="bg-zinc-900/40 border border-zinc-900 rounded-md">
                               <ToggleGroupItem value="instagram" aria-label="Instagram" className="px-2 text-xs">IG</ToggleGroupItem>
                               <ToggleGroupItem value="facebook" aria-label="Facebook" className="px-2 text-xs">FB</ToggleGroupItem>
@@ -1144,7 +1134,7 @@ export function ChatView() {
                             </ToggleGroup>
                           </div>
                           <div>
-                            <div className="text-xs text-zinc-400 mb-1">Tone</div>
+                            <div className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1">Tone</div>
                             <ToggleGroup type="single" value={tone} onValueChange={(v) => setTone((v as any) || "") } className="bg-zinc-900/40 border border-zinc-900 rounded-md">
                               <ToggleGroupItem value="bold" aria-label="Bold" className="px-2 text-xs">B</ToggleGroupItem>
                               <ToggleGroupItem value="friendly" aria-label="Friendly" className="px-2 text-xs">F</ToggleGroupItem>
@@ -1153,20 +1143,7 @@ export function ChatView() {
                             </ToggleGroup>
                           </div>
                           <div>
-                            <div className="text-xs text-zinc-400 mb-1">Variants</div>
-                            <Select value={String(variants)} onValueChange={(v) => setVariants(Number(v || 3))}>
-                              <SelectTrigger className="bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-900 rounded-md h-8 px-2">
-                                <SelectValue placeholder="Select variants" />
-                              </SelectTrigger>
-                              <SelectContent className="bg-zinc-950 border border-zinc-900 text-zinc-200">
-                                <SelectItem value="1" className="text-zinc-200 focus:bg-zinc-900">1 variant</SelectItem>
-                                <SelectItem value="3" className="text-zinc-200 focus:bg-zinc-900">3 variants (recommended)</SelectItem>
-                                <SelectItem value="5" className="text-zinc-200 focus:bg-zinc-900">5 variants</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div>
-                            <div className="text-xs text-zinc-400 mb-1">Dimensions</div>
+                            <div className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1">Dimensions</div>
                             <Select value={selectedAspectRatio} onValueChange={(v) => setSelectedAspectRatio(v)}>
                               <SelectTrigger className="bg-zinc-900/60 hover:bg-zinc-900 border border-zinc-900 rounded-md h-8 px-2">
                                 <SelectValue placeholder="Dimensions" />
@@ -1181,7 +1158,7 @@ export function ChatView() {
                             </Select>
                           </div>
                           <div>
-                            <div className="text-xs text-zinc-400 mb-1">Text color override</div>
+                            <div className="text-[11px] uppercase tracking-wide text-zinc-400 mb-1">Text color override</div>
                             <div className="flex items-center gap-2">
                               <Input
                                 type="text"

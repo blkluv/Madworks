@@ -4,9 +4,37 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Check, Crown, Sparkles } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { useState } from "react"
 
 export default function UpgradePage() {
   const router = useRouter()
+  const [loading, setLoading] = useState(false)
+
+  const startCheckout = async () => {
+    try {
+      setLoading(true)
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data?.error || "Failed to start checkout")
+      }
+      const data = await res.json()
+      if (data?.url) {
+        window.location.href = data.url as string
+      } else {
+        throw new Error("No checkout URL returned")
+      }
+    } catch (e) {
+      console.error(e)
+      // Fallback: stay on page; in a real app, surface a toast
+    } finally {
+      setLoading(false)
+    }
+  }
   return (
     <div className="min-h-screen text-zinc-100">
       <div className="container mx-auto px-4 pt-6 pb-10">
@@ -37,7 +65,9 @@ export default function UpgradePage() {
               <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-emerald-500" /> A small batch of generation credits</li>
               <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-emerald-500" /> Dedicated beta feedback channel</li>
             </ul>
-            <Button className="rounded-xl py-2.5 text-sm w-full mt-auto bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 hover:from-indigo-700 hover:via-pink-700 hover:to-orange-600 text-white">Get Starter Kit</Button>
+            <Button onClick={startCheckout} disabled={loading} className="rounded-xl py-2.5 text-sm w-full mt-auto bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 hover:from-indigo-700 hover:via-pink-700 hover:to-orange-600 text-white">
+              {loading ? "Loading..." : "Get Starter Kit"}
+            </Button>
           </Card>
         </div>
       </div>
