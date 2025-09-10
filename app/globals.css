@@ -1,8 +1,13 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+/* Ensure Tailwind v4 scans component files for class usage */
+@source "./**/*.{js,ts,jsx,tsx,mdx}";
+@source "../components/**/*.{js,ts,jsx,tsx,mdx}";
+@source "../hooks/**/*.{js,ts,jsx,tsx,mdx}";
+@source "../lib/**/*.{js,ts,jsx,tsx,mdx}";
 
+@custom-variant dark (&:is(.dark *));
 :root {
   /* Updated color scheme to Discord-like muted cool colors */
   --background: #36393f;
@@ -125,9 +130,28 @@
 
 /* Overrides to enforce black dark theme and utility classes */
 html, body { background: #000 !important; }
-.credits-pill{position:fixed;top:14px;right:16px;z-index:60}
-.chromatic-text{background:linear-gradient(90deg,#ff00cc,#3333ff,#00e5ff,#00ff85,#ffd400,#ff00cc);background-size:200% 200%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:chroma 8s ease infinite}
-@keyframes chroma{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+
+.credits-pill {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  z-index: 60;
+}
+
+.chromatic-text {
+  background: linear-gradient(90deg,#ff00cc,#3333ff,#00e5ff,#00ff85,#ffd400,#ff00cc);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: chroma 8s ease infinite;
+}
+
+@keyframes chroma {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
 
 /* Pointer cursor on hover for interactive elements */
 button:hover,

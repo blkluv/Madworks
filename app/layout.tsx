@@ -18,7 +18,6 @@ export const metadata: Metadata = {
     apple: '/mwlg2.png',
   },
   manifest: '/site.webmanifest',
-  
 }
 
 export default function RootLayout({
