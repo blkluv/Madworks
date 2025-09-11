@@ -784,7 +784,7 @@ export function ChatView() {
   const hasPreview = !!activeConv.messages.find((m) => m.role === 'assistant' && (m.attachments || []).some((a: any) => (a?.variant === 'preview')))
 
   return (
-    <div className={`h-full min-h-0 w-full bg-transparent overflow-hidden flex ${hasPreview ? 'pt-0' : 'pt-4 md:pt-6'}`}>
+    <div className={`h-full min-h-0 w-full bg-transparent overflow-visible flex ${hasPreview ? 'pt-0' : 'pt-4 md:pt-6'}`}>
       {/* Left: Conversations (hidden when a preview is present for a full-width ad view) */}
       {!hasPreview && (
       <aside className="hidden md:flex w-[220px] lg:w-[260px] flex-col">
@@ -830,39 +830,38 @@ export function ChatView() {
       <section className="flex-1 min-h-0 flex flex-col">
         {/* Messages & Collage */}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain chat-scrollbar no-anchor w-full">
-          <div className={`mx-auto max-w-none px-2 md:px-4 lg:px-6 ${hasPreview ? 'py-4 space-y-4' : 'py-6 space-y-8'}`} style={{ paddingBottom: Math.max(64, composerH + 24) }}>
+          <div className="mx-auto w-full max-w-3xl px-4 md:px-6 py-6 space-y-8" style={{ paddingBottom: Math.max(64, composerH + 24) }}>
             {activeConv.messages.length === 0 && (
               <div className="w-full">
-                <div className="mt-2 grid grid-cols-2 gap-3 max-w-xl mx-auto">
-                {suggestions4.map((s, i) => (
-                  <div key={i} className="relative group isolate">
-                    <div className="pointer-events-none absolute -inset-[2px] rounded-xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
-                    <button
-                      onClick={() => {
-                        if (s.preset) {
-                          if (s.preset.platform) setPlatform(s.preset.platform as any)
-                          if (s.preset.tone) setTone(s.preset.tone as any)
-                          if (s.preset.aspect) setSelectedAspectRatio(s.preset.aspect)
-                          // variants count removed
-                        }
-                        applySuggestion(s.text)
-                      }}
-                      className="relative z-10 w-full text-left rounded-xl border border-zinc-900/60 bg-zinc-900/50 hover:bg-zinc-900/60 p-5"
-                    >
-                      <div className="text-base text-zinc-200">{s.label}</div>
-                      <div className="text-sm text-zinc-400 mt-1 line-clamp-2">{s.text}</div>
-                    </button>
-                  </div>
-                ))}
+                <div className="mt-2 grid grid-cols-2 gap-3">
+                  {suggestions4.map((s, i) => (
+                    <div key={i} className="relative group isolate">
+                      <div className="pointer-events-none absolute -inset-[2px] rounded-xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
+                      <button
+                        onClick={() => {
+                          if (s.preset) {
+                            if (s.preset.platform) setPlatform(s.preset.platform as any)
+                            if (s.preset.tone) setTone(s.preset.tone as any)
+                            if (s.preset.aspect) setSelectedAspectRatio(s.preset.aspect)
+                          }
+                          applySuggestion(s.text)
+                        }}
+                        className="relative z-10 w-full text-left rounded-xl border border-zinc-900/60 bg-zinc-900/50 hover:bg-zinc-900/60 p-5"
+                      >
+                        <div className="text-base text-zinc-200">{s.label}</div>
+                        <div className="text-sm text-zinc-400 mt-1 line-clamp-2">{s.text}</div>
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Message thread: render both user and assistant messages inline */}
           {activeConv.messages.map((m) => (
             m.role === 'user' ? (
               <div key={m.id} className="flex justify-end">
-                <div className="relative group isolate max-w-full">
+                <div className="relative group isolate w-full max-w-3xl">
                   <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
                   <div className="relative z-10 rounded-2xl px-5 py-3.5 border bg-zinc-900/50 border-zinc-900/60">
                     <div className="whitespace-pre-wrap text-zinc-200 text-[15px]">{m.content}</div>
@@ -915,7 +914,7 @@ export function ChatView() {
                   {!m.attachments?.some((a:any)=>a?.variant==='preview') && (
                     <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 group-hover:opacity-10 blur-sm transition-opacity z-0"></div>
                   )}
-                  <div className={`relative z-10 rounded-2xl ${m.attachments?.some((a:any)=>a?.variant==='preview') ? 'px-0 py-0 border-none bg-transparent max-w-3xl mx-auto' : 'px-5 py-3.5 border bg-zinc-900/40 border-zinc-900/60'}`}>
+                  <div className={`relative z-10 rounded-2xl ${m.attachments?.some((a:any)=>a?.variant==='preview') ? 'px-0 py-0 border-none bg-transparent max-w-3xl mx-auto' : 'px-5 py-3.5 border bg-zinc-900/40 border-zinc-900/60 max-w-3xl mx-auto'}`}>
                     {m.content && !m.attachments?.some((a:any)=>a?.variant==='preview') && (
                       <div className="whitespace-pre-wrap text-zinc-200 text-[15px] mb-2 max-w-screen-lg">{m.content}</div>
                     )}
@@ -1046,12 +1045,15 @@ export function ChatView() {
           </div>
         </div>
 
-        {/* Composer (fixed to viewport bottom for stability) */}
-        <div ref={composerRef} className="fixed bottom-0 left-0 right-0 z-20 p-4 pb-[env(safe-area-inset-bottom)] bg-transparent" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
-          <div className="w-full max-w-3xl mx-auto">
-            <div className="mb-2 flex justify-end">
-              <CreditsPill variant="inline" />
-            </div>
+        {/* Composer (raised, levitating with glow) */}
+        <div ref={composerRef} className={`fixed bottom-8 right-0 z-40 p-4 pb-[env(safe-area-inset-bottom)] bg-transparent ${!hasPreview ? 'left-0 md:left-[220px] lg:left-[260px]' : 'left-0'}`} onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+          <div className="mx-auto w-full max-w-3xl px-4 md:px-6">
+            <div className="relative w-full max-w-3xl mx-auto">
+            {/* Ambient levitation glow */}
+              <div className="pointer-events-none absolute -inset-8 rounded-3xl bg-[radial-gradient(60%_60%_at_50%_50%,rgba(99,102,241,0.28),rgba(236,72,153,0.24)_50%,rgba(245,158,11,0.2)_80%,transparent_100%)] blur-3xl"></div>
+              <div className="mb-2 flex justify-end">
+                <CreditsPill variant="inline" />
+              </div>
           {/* Advanced controls (hidden by default) */}
           {showOptions && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -1224,6 +1226,7 @@ export function ChatView() {
               )}
             </div>
           </form>
+            </div>
           </div>
         </div>
       </section>

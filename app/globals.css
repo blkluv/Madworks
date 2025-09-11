@@ -160,3 +160,14 @@ a:hover,
 [role="button"]:hover {
   cursor: pointer;
 }
+
+/* Remove bottom border from header */
+.sticky-header {
+  border-bottom: none !important;
+  box-shadow: none !important;
+}
+
+.sticky-header > div {
+  border-bottom: none !important;
+  box-shadow: none !important;
+}

@@ -33,9 +33,25 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
   }
   const selectedView: ViewType = (currentView ?? ((searchParams.get("view") as ViewType) || "home"))
   return (
-    <div className="sticky top-0 z-50">
-      <div className="w-full px-4 py-4">
-        <div className="flex items-center justify-between">
+    <div className="sticky top-0 z-50 overflow-hidden" style={{
+      borderBottom: 'none',
+      boxShadow: 'none',
+      WebkitBoxShadow: 'none',
+      MozBoxShadow: 'none',
+      ['-ms-box-shadow' as any]: 'none'
+    }}>
+      <div className="w-full relative overflow-visible bg-gradient-to-r from-amber-500/20 via-pink-500/23 to-purple-500/20" style={{
+        borderBottom: 'none',
+        boxShadow: 'none',
+        WebkitBoxShadow: 'none',
+        MozBoxShadow: 'none',
+        ['-ms-box-shadow' as any]: 'none'
+      }}>
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,var(--tw-gradient-stops))] from-amber-400/8 via-transparent to-purple-500/8 -z-10" />
+        <div className="absolute -bottom-4 left-0 right-0 h-16 bg-gradient-to-t from-amber-400/10 via-transparent to-transparent -z-10 blur-sm" />
+        <div className="absolute -bottom-6 left-0 right-0 h-20 bg-gradient-to-t from-pink-400/15 via-transparent to-transparent -z-20 blur-md" />
+        <div className="absolute -bottom-8 left-0 right-0 h-24 bg-gradient-to-t from-purple-500/20 via-transparent to-transparent -z-30 blur-lg" />
+        <div className="mx-auto max-w-7xl px-4 py-3 relative z-10 flex items-center justify-between">
           <div
             role="button"
             onClick={() => goto("home")}

@@ -11,7 +11,7 @@ type ViewType = "home" | "studio" | "gallery" | "premium" | "chat" | "refine" | 
 
 function HomeContent() {
   return (
-    <div className={`h-full min-h-0 text-zinc-100 relative overflow-x-hidden`}>
+    <div className={`h-full min-h-0 text-zinc-100 relative overflow-visible`}>
       <Suspense fallback={
         <div className="flex items-center justify-center h-full">
           <div className="animate-pulse">Loading...</div>
