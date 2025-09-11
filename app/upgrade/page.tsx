@@ -52,15 +52,15 @@ export default function UpgradePage() {
         </div>
 
         <div className="grid md:grid-cols-1 gap-5 max-w-xl mx-auto">
-          <Card className="bg-zinc-900/70 border border-zinc-800 rounded-2xl p-6 backdrop-blur flex flex-col relative">
+          <Card className="bg-zinc-900/70 border border-zinc-800 rounded-2xl p-6 backdrop-blur flex flex-col relative text-center">
             <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-indigo-600 via-pink-600 to-orange-500 text-white text-[10px] tracking-wide">Beta Access</div>
             <div className="mb-4">
-              <h3 className="text-lg font-semibold mb-1 flex items-center gap-2"><Sparkles className="w-4 h-4" /> Starter Kit</h3>
-              <div className="text-2xl font-bold">$5</div>
+              <h3 className="text-lg font-semibold mb-1 inline-flex items-center gap-2"><Sparkles className="w-4 h-4" /> Starter Kit</h3>
+              <div className="text-4xl md:text-5xl font-extrabold">$7.50</div>
               <div className="text-zinc-400 text-xs">one-time beta testing kit</div>
             </div>
             <p className="text-sm text-zinc-400 mb-5">This Starter Kit is our early‑access, beta testing kit — a lightweight way to try modern ad generation and help us shape what ships next.</p>
-            <ul className="space-y-2.5 text-zinc-300 text-sm mb-6">
+            <ul className="space-y-2.5 text-zinc-300 text-sm mb-6 flex flex-col items-center">
               <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-emerald-500" /> Early access to new features</li>
               <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-emerald-500" /> A small batch of generation credits</li>
               <li className="flex items-center gap-2"><Check className="w-3.5 h-3.5 text-emerald-500" /> Dedicated beta feedback channel</li>
