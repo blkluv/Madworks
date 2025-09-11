@@ -11,7 +11,7 @@ export function HomeView() {
       {/* Hero Section (no big box) */}
       <div className="text-center space-y-6">
         <h1 className="text-4xl font-bold text-white tracking-tight">
-          <span className="chromatic-text">Transform</span> Your Ads with AI
+          <span className="bg-gradient-to-r from-indigo-400 via-pink-500 to-purple-500 bg-clip-text text-transparent">Transform</span> Your Ads with AI
         </h1>
         <p className="text-gray-300 text-lg max-w-3xl mx-auto">
           Upload an image and describe your goal. We’ll generate crisp, on‑brand ads across sizes and formats.

@@ -33,25 +33,10 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
   }
   const selectedView: ViewType = (currentView ?? ((searchParams.get("view") as ViewType) || "home"))
   return (
-    <div className="sticky top-0 z-50 overflow-hidden" style={{
-      borderBottom: 'none',
-      boxShadow: 'none',
-      WebkitBoxShadow: 'none',
-      MozBoxShadow: 'none',
-      ['-ms-box-shadow' as any]: 'none'
-    }}>
-      <div className="w-full relative overflow-visible bg-gradient-to-r from-amber-500/20 via-pink-500/23 to-purple-500/20" style={{
-        borderBottom: 'none',
-        boxShadow: 'none',
-        WebkitBoxShadow: 'none',
-        MozBoxShadow: 'none',
-        ['-ms-box-shadow' as any]: 'none'
-      }}>
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,var(--tw-gradient-stops))] from-amber-400/8 via-transparent to-purple-500/8 -z-10" />
-        <div className="absolute -bottom-4 left-0 right-0 h-16 bg-gradient-to-t from-amber-400/10 via-transparent to-transparent -z-10 blur-sm" />
-        <div className="absolute -bottom-6 left-0 right-0 h-20 bg-gradient-to-t from-pink-400/15 via-transparent to-transparent -z-20 blur-md" />
-        <div className="absolute -bottom-8 left-0 right-0 h-24 bg-gradient-to-t from-purple-500/20 via-transparent to-transparent -z-30 blur-lg" />
-        <div className="mx-auto max-w-7xl px-4 py-3 relative z-10 flex items-center justify-between">
+    <div className="sticky top-0 z-50">
+      <div className="w-full relative overflow-visible bg-transparent">
+        <div className="mx-auto max-w-7xl px-4 py-3 relative z-10">
+          <div className="flex items-center justify-between gap-3 rounded-full px-4 py-2 bg-[linear-gradient(90deg,rgba(88,101,242,0.28)_0%,rgba(236,72,153,0.20)_50%,rgba(147,51,234,0.28)_100%)] backdrop-blur-md ring-1 ring-white/20 shadow-[0_6px_24px_rgba(0,0,0,0.35)]">
           <div
             role="button"
             onClick={() => goto("home")}
@@ -59,7 +44,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             aria-label="Go to Home"
             title="Madworks AI - Home"
           >
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <Image
                 src="/mwlg2.png"
                 alt="Madworks logo"
@@ -68,9 +53,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                 className="h-12 w-auto object-contain"
                 priority
               />
-              <span className="text-3xl font-bold text-white">
-                Madworks AI
-              </span>
+              <span className="text-2xl md:text-3xl font-bold text-white select-none">Madworks AI</span>
             </div>
           </div>
 
@@ -82,7 +65,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("home")}
                   variant="outline"
                   size="lg"
-                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'home' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border backdrop-blur-sm shadow-md shadow-black/30 ring-1 ring-white/10 ${selectedView === 'home' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   {selectedView === 'home' && (
                     <span className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0" />
@@ -94,7 +77,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("chat")}
                   variant="outline"
                   size="lg"
-                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'chat' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border backdrop-blur-sm shadow-md shadow-black/30 ring-1 ring-white/10 ${selectedView === 'chat' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   {selectedView === 'chat' && (
                     <span className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0" />
@@ -106,7 +89,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("studio")}
                   variant="outline"
                   size="lg"
-                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'studio' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border backdrop-blur-sm shadow-md shadow-black/30 ring-1 ring-white/10 ${selectedView === 'studio' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   {selectedView === 'studio' && (
                     <span className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0" />
@@ -118,7 +101,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                   onClick={() => goto("gallery")}
                   variant="outline"
                   size="lg"
-                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border ${selectedView === 'gallery' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
+                  className={`group relative isolate overflow-visible rounded-xl px-6 py-3 font-semibold border backdrop-blur-sm shadow-md shadow-black/30 ring-1 ring-white/10 ${selectedView === 'gallery' ? 'bg-zinc-900/70 text-white border-zinc-700 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]' : 'bg-zinc-900/50 text-zinc-200 border-zinc-800 hover:bg-zinc-900/70'}`}
                 >
                   {selectedView === 'gallery' && (
                     <span className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#f59e0b_0deg,#6366f1_120deg,#ec4899_240deg,#f59e0b_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0" />
@@ -133,7 +116,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             {/* Right cluster: Upgrade, User avatar */}
             <Button
               onClick={() => (window.location.href = "/upgrade")}
-              className="h-12 px-5 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black shadow-lg shadow-yellow-500/25"
+              className="h-12 px-5 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black shadow-lg shadow-yellow-500/25 backdrop-blur-sm ring-1 ring-white/10"
             >
               <Crown className="w-4 h-4 mr-2" /> Upgrade
             </Button>
@@ -147,7 +130,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                     setShowAccountDropdown((s) => !s)
                   }
                 }}
-                className="h-12 w-12 p-0 bg-zinc-900/70 hover:bg-zinc-900 text-white rounded-full shadow border border-zinc-700 flex items-center justify-center overflow-visible"
+                className="h-12 w-12 p-0 bg-zinc-900/60 hover:bg-zinc-900/70 text-white rounded-full border border-zinc-700 flex items-center justify-center overflow-visible backdrop-blur-sm shadow-md shadow-black/30 ring-1 ring-white/10"
               >
                 {isAuthed && session?.user?.image ? (
                   // Show Google user avatar in a fixed-size circular frame
@@ -225,6 +208,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                 )}
               </div>
             </div>
+          </div>
           </div>
         </div>
       </div>
