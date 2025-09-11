@@ -55,7 +55,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const checkoutSession = await stripe.checkout.sessions.create({
+    const baseParams: Stripe.Checkout.SessionCreateParams = {
       mode: "payment",
       line_items: [
         {
@@ -69,8 +69,11 @@ export async function POST(req: Request) {
       metadata: {
         userId: String(userId),
       },
-      customer_email: customerEmail ?? undefined,
-      customer: customerId,
+    };
+
+    const checkoutSession = await stripe.checkout.sessions.create({
+      ...baseParams,
+      ...(customerId ? { customer: customerId } : { customer_email: customerEmail ?? undefined }),
     });
 
     if (!checkoutSession.url) {
