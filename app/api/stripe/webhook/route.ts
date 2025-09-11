@@ -4,11 +4,28 @@ import Stripe from "stripe";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Placeholder provisioning: replace with your real user upgrade logic
-async function markUserUpgraded(userId: string, session: Stripe.Checkout.Session) {
-  console.log(`[stripe:webhook] Marking user upgraded`, { userId, sessionId: session.id });
-  // TODO: integrate with your user store to persist upgrade, e.g.,
-  // await db.user.update({ where: { id: userId }, data: { isUpgraded: true } })
+// Mark the Stripe customer as upgraded (source of truth for entitlements)
+async function markUserUpgraded(stripe: Stripe, userId: string, session: Stripe.Checkout.Session) {
+  try {
+    const customerId = typeof session.customer === "string" ? session.customer : (session.customer as any)?.id;
+    if (!customerId) {
+      console.warn(`[stripe:webhook] No customer on session ${session.id}`);
+      return;
+    }
+    const current = await stripe.customers.retrieve(customerId);
+    const metadata = (current as Stripe.Customer).metadata || {};
+    await stripe.customers.update(customerId, {
+      metadata: {
+        ...metadata,
+        is_upgraded: "true",
+        upgraded_at: new Date().toISOString(),
+        upgraded_via: "starter_kit",
+      },
+    });
+    console.log(`[stripe:webhook] Upgraded customer ${customerId} for user ${userId}`);
+  } catch (e) {
+    console.error(`[stripe:webhook] Failed to mark upgraded`, e);
+  }
 }
 
 export async function POST(req: Request) {
@@ -40,7 +57,7 @@ export async function POST(req: Request) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
         const userId = (session.metadata?.userId as string) || "unknown";
-        await markUserUpgraded(userId, session);
+        await markUserUpgraded(stripe, userId, session);
         break;
       }
       default: {

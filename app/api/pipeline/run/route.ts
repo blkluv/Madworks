@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
+import Stripe from "stripe";
 
 // Endpoint orchestrates the Python pipeline service with extensive step-by-step logging.
 // Accepts multipart/form-data (preferred) with fields:
@@ -29,6 +31,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function nowEpochMs() {
+  return Date.now();
+}
+
 // Deterministic 32-bit hash for seeds (Edge-safe, no Node crypto required)
 function hash32(str: string): number { //
   let h = 2166136261 >>> 0; // FNV-1a basis
@@ -48,6 +54,23 @@ function makeRng(seed: number) {
     s = (Math.imul(1664525, s) + 1013904223) >>> 0;
     return (s >>> 0) / 0x100000000;
   };
+}
+
+async function getOrCreateCustomerByEmail(stripe: Stripe, email: string) {
+  const existing = await stripe.customers.list({ email, limit: 1 });
+  if (existing.data.length > 0) return existing.data[0];
+  return stripe.customers.create({ email, metadata: {} });
+}
+
+async function setCustomerMetadata(stripe: Stripe, customerId: string, patch: Record<string, string>) {
+  try {
+    const current = await stripe.customers.retrieve(customerId);
+    const md = (current as Stripe.Customer).metadata || {};
+    await stripe.customers.update(customerId, { metadata: { ...md, ...patch } });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[entitlements] Failed to update customer metadata", e);
+  }
 }
 
 type LogEntry = {
@@ -98,6 +121,12 @@ async function fetchJson(url: string, init?: RequestInit, timeoutMs: number = 60
 export async function POST(req: Request) {
   const logs: LogEntry[] = [];
   const started = Date.now();
+  const isDev = process.env.NODE_ENV === "development";
+  let stripeClient: Stripe | null = null;
+  let stripeCustomerId: string | null = null;
+  let isUpgraded = false;
+  let placedFreeLock = false;
+  let userEmail: string | null = null;
   let analysis: any = null;
   let copy: any = null;
   let composition: any = null;
@@ -122,6 +151,51 @@ export async function POST(req: Request) {
   let variant_seed_override: number | undefined;
 
   try {
+    // Entitlement gate: in non-development, require auth and enforce one free generation unless upgraded
+    if (!isDev) {
+      const session = await auth();
+      const email = (session?.user as any)?.email as string | undefined;
+      if (!email) {
+        logStep(logs, "entitlements", "error", "Not authenticated");
+        return NextResponse.json({ ok: false, logs, error: "Sign-in required" }, { status: 401 });
+      }
+      userEmail = email;
+
+      if (!process.env.STRIPE_SECRET_KEY) {
+        logStep(logs, "entitlements", "error", "Billing not configured (STRIPE_SECRET_KEY missing)\n" +
+          "Contact support or try again later.");
+        return NextResponse.json({ ok: false, logs, error: "Billing not configured" }, { status: 500 });
+      }
+      stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: "2024-06-20" });
+      try {
+        const customer = await getOrCreateCustomerByEmail(stripeClient, email);
+        stripeCustomerId = customer.id;
+        const md = (customer as Stripe.Customer).metadata || {};
+        if (md.is_upgraded === "true") {
+          isUpgraded = true;
+          logStep(logs, "entitlements", "ok", "User is upgraded", { email });
+        } else {
+          const now = nowEpochMs();
+          const lockTs = Number(md.free_lock_ts || 0);
+          if (Number.isFinite(lockTs) && lockTs > 0 && now - lockTs < 10 * 60 * 1000) {
+            logStep(logs, "entitlements", "error", "Another generation is in progress", { email });
+            return NextResponse.json({ ok: false, logs, error: "Another generation is in progress. Try again shortly." }, { status: 429 });
+          }
+          if (md.free_used === "true") {
+            logStep(logs, "entitlements", "error", "Free generation already used", { email });
+            return NextResponse.json({ ok: false, logs, error: "Upgrade required", upgrade_required: true }, { status: 402 });
+          }
+          // Place a short-lived lock to prevent concurrent abuse; cleared after run or expires after 10m
+          await stripeClient.customers.update(customer.id, { metadata: { ...md, free_lock_ts: String(now) } });
+          placedFreeLock = true;
+          logStep(logs, "entitlements", "ok", "Free generation lock placed", { email });
+        }
+      } catch (e) {
+        logStep(logs, "entitlements", "error", "Failed to check entitlements", undefined, undefined, e);
+        return NextResponse.json({ ok: false, logs, error: "Failed to check entitlements" }, { status: 500 });
+      }
+    }
+
     // Decide parsing mode by Content-Type
     const contentType = (req.headers.get("content-type") || "").toLowerCase();
     const isMultipart = contentType.includes("multipart/form-data");
@@ -233,6 +307,10 @@ export async function POST(req: Request) {
   } catch (e) {
     ok = false;
     logStep(logs, "parse_input", "error", "Failed to parse input", undefined, undefined, e);
+    // Clear any entitlement lock before exiting
+    if (!isDev && stripeClient && stripeCustomerId && placedFreeLock && !isUpgraded) {
+      await setCustomerMetadata(stripeClient, stripeCustomerId, { free_lock_ts: "" });
+    }
     return NextResponse.json({ ok, logs, error: "Bad input" }, { status: 400 });
   }
 
@@ -484,6 +562,15 @@ export async function POST(req: Request) {
 
   const totalMs = Date.now() - started;
   logStep(logs, "summary", ok ? "ok" : "error", `Pipeline finished in ${totalMs}ms`);
+
+  // Finalize entitlements: if user used the free run, mark as used and clear lock
+  if (!isDev && stripeClient && stripeCustomerId && placedFreeLock && !isUpgraded) {
+    if (ok) {
+      await setCustomerMetadata(stripeClient, stripeCustomerId, { free_used: "true", free_lock_ts: "" });
+    } else {
+      await setCustomerMetadata(stripeClient, stripeCustomerId, { free_lock_ts: "" });
+    }
+  }
 
   return NextResponse.json({
     ok,

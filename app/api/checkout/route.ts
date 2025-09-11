@@ -10,6 +10,14 @@ function getSiteUrl() {
   return siteUrl?.replace(/\/$/, "");
 }
 
+async function getOrCreateCustomer(stripe: Stripe, email: string) {
+  // Try to find existing customer by email
+  const existing = await stripe.customers.list({ email, limit: 1 });
+  if (existing.data.length > 0) return existing.data[0];
+  // Create a new customer to carry metadata like free_used/is_upgraded
+  return stripe.customers.create({ email, metadata: {} });
+}
+
 export async function POST(req: Request) {
   try {
     const session = await auth();
@@ -37,6 +45,16 @@ export async function POST(req: Request) {
     const userId = (session?.user as any)?.id || (session?.user as any)?.email || "anonymous";
     const customerEmail = (session?.user as any)?.email;
 
+    let customerId: string | undefined = undefined;
+    if (customerEmail) {
+      try {
+        const customer = await getOrCreateCustomer(stripe, customerEmail);
+        customerId = customer.id;
+      } catch (e) {
+        // Non-fatal, proceed without explicit customer linkage
+      }
+    }
+
     const checkoutSession = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: [
@@ -52,6 +70,7 @@ export async function POST(req: Request) {
         userId: String(userId),
       },
       customer_email: customerEmail ?? undefined,
+      customer: customerId,
     });
 
     if (!checkoutSession.url) {
