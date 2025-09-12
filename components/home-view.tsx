@@ -7,13 +7,13 @@ import { HomeChatBox } from "./home-chat-box"
 
 export function HomeView() {
   return (
-    <div className="max-w-6xl mx-auto space-y-12">
+    <div className="max-w-6xl mx-auto space-y-8 sm:space-y-12">
       {/* Hero Section (no big box) */}
-      <div className="text-center space-y-6">
-        <h1 className="text-4xl font-bold text-white tracking-tight">
+      <div className="text-center space-y-4 sm:space-y-6">
+        <h1 className="text-3xl sm:text-4xl font-bold text-white tracking-tight">
           <span className="bg-gradient-to-r from-indigo-400 via-pink-500 to-purple-500 bg-clip-text text-transparent">Transform</span> Your Ads with AI
         </h1>
-        <p className="text-gray-300 text-lg max-w-3xl mx-auto">
+        <p className="text-gray-300 text-base sm:text-lg max-w-3xl mx-auto px-2">
           Upload an image and describe your goal. We’ll generate crisp, on‑brand ads across sizes and formats.
         </p>
       </div>
@@ -24,8 +24,8 @@ export function HomeView() {
       </div>
 
       {/* Info Section */}
-      <div className="max-w-6xl mx-auto pt-12">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="max-w-6xl mx-auto pt-8 sm:pt-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           <Card className="bg-zinc-950/80 border border-zinc-900 rounded-2xl p-6">
             <div className="flex items-start gap-3">
               <Zap className="w-5 h-5 text-emerald-400 mt-1" />

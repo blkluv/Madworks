@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import { GeistSans } from 'geist/font/sans'
 import { GeistMono } from 'geist/font/mono'
 import './globals.css'
@@ -20,6 +20,12 @@ export const metadata: Metadata = {
   manifest: '/site.webmanifest',
 }
 
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -36,7 +42,7 @@ html {
 }
         `}</style>
       </head>
-      <body className="text-zinc-100">
+      <body className="text-zinc-100 min-h-screen overflow-x-hidden antialiased">
         <AuthProvider>
           <AppProvider>
             <div className="relative min-h-screen flex flex-col">

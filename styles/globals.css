@@ -122,6 +122,21 @@
   }
 }
 
+/* Mobile-friendly media defaults */
+img, video, canvas {
+  max-width: 100%;
+  height: auto;
+}
+svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Reduce tap highlight and accidental zoom behaviors */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* Custom dark scrollbar (subtle, seamless) */
 .custom-scrollbar {
   /* Firefox */

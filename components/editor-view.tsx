@@ -166,6 +166,8 @@ export function EditorView() {
   const [bg, setBg] = useState<string>("#0a0a0a")
   const [aspect, setAspect] = useState("1:1")
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [scale, setScale] = useState<number>(1)
   const [assetTab, setAssetTab] = useState<'images'|'icons'|'uploads'>('images')
   const [assetQuery, setAssetQuery] = useState('')
 
@@ -199,6 +201,20 @@ export function EditorView() {
       localStorage.setItem('mw:editor:current', JSON.stringify({ elements, bg, aspect }))
     } catch {}
   }, [elements, bg, aspect])
+
+  // Fit canvas to available width on small screens by scaling down
+  useEffect(() => {
+    const updateScale = () => {
+      try {
+        const maxW = containerRef.current?.clientWidth || canvasPx.w
+        const next = Math.min(1, Math.max(0.2, (maxW - 2) / canvasPx.w))
+        setScale(next)
+      } catch {}
+    }
+    updateScale()
+    window.addEventListener('resize', updateScale)
+    return () => window.removeEventListener('resize', updateScale)
+  }, [canvasPx.w])
 
   const selected = elements.find((e) => e.id === selectedId) || null
 
@@ -333,19 +349,25 @@ export function EditorView() {
 
   // Drag logic
   const startDrag = (id: string) => usePointerDrag((dx, dy) => {
-    setElements((prev) => prev.map((e) => e.id === id ? { ...e, x: clamp(e.x + dx, 0, canvasPx.w - e.width), y: clamp(e.y + dy, 0, canvasPx.h - e.height) } : e))
+    const s = scale || 1
+    const ddx = dx / s
+    const ddy = dy / s
+    setElements((prev) => prev.map((e) => e.id === id ? { ...e, x: clamp(e.x + ddx, 0, canvasPx.w - e.width), y: clamp(e.y + ddy, 0, canvasPx.h - e.height) } : e))
   })
 
   type Corner = 'nw' | 'ne' | 'sw' | 'se'
   const startResize = (id: string, corner: Corner) => usePointerDrag((dx, dy) => {
+    const s = scale || 1
+    const ddx = dx / s
+    const ddy = dy / s
     setElements((prev) => prev.map((e) => {
       if (e.id !== id) return e
       let { x, y, width, height } = e
       const min = 40
-      if (corner === 'se') { width = clamp(width + dx, min, canvasPx.w - x); height = clamp(height + dy, min, canvasPx.h - y) }
-      if (corner === 'sw') { width = clamp(width - dx, min, x + width); height = clamp(height + dy, min, canvasPx.h - y); x = clamp(x + dx, 0, x + width) }
-      if (corner === 'ne') { width = clamp(width + dx, min, canvasPx.w - x); height = clamp(height - dy, min, y + height); y = clamp(y + dy, 0, y + height) }
-      if (corner === 'nw') { width = clamp(width - dx, min, x + width); height = clamp(height - dy, min, y + height); x = clamp(x + dx, 0, x + width); y = clamp(y + dy, 0, y + height) }
+      if (corner === 'se') { width = clamp(width + ddx, min, canvasPx.w - x); height = clamp(height + ddy, min, canvasPx.h - y) }
+      if (corner === 'sw') { width = clamp(width - ddx, min, x + width); height = clamp(height + ddy, min, canvasPx.h - y); x = clamp(x + ddx, 0, x + width) }
+      if (corner === 'ne') { width = clamp(width + ddx, min, canvasPx.w - x); height = clamp(height - ddy, min, y + height); y = clamp(y + ddy, 0, y + height) }
+      if (corner === 'nw') { width = clamp(width - ddx, min, x + width); height = clamp(height - ddy, min, y + height); x = clamp(x + ddx, 0, x + width); y = clamp(y + ddy, 0, y + height) }
       return { ...e, x, y, width, height }
     }))
   })
@@ -427,7 +449,7 @@ export function EditorView() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
+    <div className="max-w-7xl mx-auto px-4 md:px-0">
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -485,9 +507,9 @@ export function EditorView() {
         </div>
       </div>
 
-      <div className="grid grid-cols-12 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         {/* Assets */}
-        <aside className="col-span-3 bg-zinc-950/80 border border-zinc-900 rounded-2xl p-3 h-[72vh] overflow-y-auto">
+        <aside className="md:col-span-3 order-2 md:order-1 bg-zinc-950/80 border border-zinc-900 rounded-2xl p-3 h-[72vh] overflow-y-auto">
           <Tabs value={assetTab} onValueChange={(v) => setAssetTab(v as any)} className="w-full">
             <TabsList className="grid grid-cols-3 bg-zinc-900 rounded-xl">
               <TabsTrigger value="images">Images</TabsTrigger>
@@ -539,18 +561,19 @@ export function EditorView() {
         </aside>
 
         {/* Canvas + Inspector */}
-        <main className="col-span-9 grid grid-cols-9 gap-4">
-          <div className="col-span-6">
+        <main className="md:col-span-9 order-1 md:order-2 grid grid-cols-1 lg:grid-cols-9 gap-4">
+          <div className="lg:col-span-6">
             <div className="rounded-2xl border border-zinc-900 bg-zinc-950/60 p-4">
-              <div className="relative mx-auto" style={{ width: canvasPx.w, height: canvasPx.h }}>
-                <div
-                  ref={wrapRef}
-                  role="region"
-                  aria-label="Design canvas"
-                  className="relative overflow-hidden rounded-xl"
-                  style={{ width: canvasPx.w, height: canvasPx.h, background: bg }}
-                  onClick={onCanvasClick}
-                >
+              <div ref={containerRef} className="relative w-full overflow-x-auto">
+                <div className="relative origin-top-left mx-auto" style={{ width: canvasPx.w, height: canvasPx.h, transform: `scale(${scale})` }}>
+                  <div
+                    ref={wrapRef}
+                    role="region"
+                    aria-label="Design canvas"
+                    className="relative overflow-hidden rounded-xl"
+                    style={{ width: canvasPx.w, height: canvasPx.h, background: bg }}
+                    onClick={onCanvasClick}
+                  >
                   {/* guidelines */}
                   <div className="pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 w-px h-full bg-white/5" />
                   <div className="pointer-events-none absolute top-1/2 left-0 -translate-y-1/2 h-px w-full bg-white/5" />
@@ -566,13 +589,14 @@ export function EditorView() {
                       onChange={(patch) => setElements((prev) => prev.map((e) => e.id === el.id ? { ...(e as any), ...(patch as any) } : e))}
                     />
                   ))}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Inspector */}
-          <div className="col-span-3">
+          <div className="lg:col-span-3">
             <div className="rounded-2xl border border-zinc-900 bg-zinc-950/80 p-3 h-[72vh] overflow-y-auto">
               {/* Layers list */}
               <div className="mb-3">
