@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle, Menu, X } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useSession } from "next-auth/react"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, useRouter } from "next/navigation"
 import Image from "next/image"
 
 type ViewType = "home" | "studio" | "gallery" | "premium" | "chat"
@@ -16,6 +16,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
   const isAuthed = status === 'authenticated'
   const dropdownRef = useRef<HTMLDivElement>(null)
   const searchParams = useSearchParams()
+  const router = useRouter()
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -42,8 +43,13 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
     }
   }, [mobileMenuOpen])
   const goto = (view: ViewType) => {
-    if (onNavChange) onNavChange(view)
-    else window.location.href = `/?view=${view}`
+    try {
+      if (onNavChange) onNavChange(view)
+      else router.push(`/?view=${view}`)
+    } catch {
+      // Fallback to hard nav only if router fails
+      if (typeof window !== 'undefined') window.location.href = `/?view=${view}`
+    }
   }
   const selectedView: ViewType = (currentView ?? ((searchParams.get("view") as ViewType) || "home"))
   return (
@@ -67,12 +73,12 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                 className="h-9 sm:h-10 md:h-12 w-auto object-contain"
                 priority
               />
-              <span className="hidden sm:inline text-2xl md:text-3xl font-bold text-white select-none truncate">Madworks AI</span>
+              <span className="inline text-sm sm:text-base md:text-xl lg:text-3xl font-bold text-white select-none truncate max-w-[55vw] sm:max-w-[50vw] md:max-w-[40vw] lg:max-w-none">Madworks AI</span>
             </div>
           </div>
 
           {/* Desktop / Tablet nav */}
-          <div className="hidden md:flex flex-1 min-w-0 justify-center -mx-2 px-2">
+          <div className="hidden lg:flex flex-1 min-w-0 justify-center -mx-2 px-2">
             <nav className="flex items-center gap-2 whitespace-nowrap">
               <div className="flex items-center gap-2">
                 <Button
@@ -127,18 +133,18 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             </nav>
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 justify-self-end">
+          <div className="flex items-center gap-2 sm:gap-3 justify-self-end flex-shrink-0">
             {/* Right cluster: Upgrade, User avatar */}
             <Button
               onClick={() => (window.location.href = "/upgrade")}
-              className="hidden md:inline-flex h-9 md:h-11 lg:h-12 px-4 md:px-5 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black text-sm md:text-base shadow-lg shadow-yellow-500/25 backdrop-blur-sm ring-1 ring-white/10"
+              className="hidden lg:inline-flex h-9 md:h-11 lg:h-12 px-4 md:px-5 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black text-sm md:text-base shadow-lg shadow-yellow-500/25 backdrop-blur-sm ring-1 ring-white/10"
             >
               <Crown className="w-4 h-4 mr-2" /> Upgrade
             </Button>
             {/* Mobile menu button */}
             <Button
               size="icon"
-              className="md:hidden h-9 w-9 p-0 rounded-xl bg-zinc-900/60 hover:bg-zinc-900/70 text-white border border-zinc-700"
+              className="lg:hidden h-9 w-9 p-0 rounded-xl bg-zinc-900/60 hover:bg-zinc-900/70 text-white border border-zinc-700"
               onClick={() => setMobileMenuOpen(true)}
               aria-label="Open menu"
             >

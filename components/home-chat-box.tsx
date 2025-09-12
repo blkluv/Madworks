@@ -4,12 +4,14 @@ import { useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { useApp } from "./app-context"
 import { PlusCircle, Send, ImageIcon } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 export function HomeChatBox() {
   const { setPendingPrompt, setPendingFiles } = useApp()
   const [prompt, setPrompt] = useState("")
   const [files, setFiles] = useState<File[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const router = useRouter()
 
   const onFiles = (incoming: FileList | File[]) => {
     const imgs = Array.from(incoming).filter((f) => f.type.startsWith("image/"))
@@ -26,15 +28,11 @@ export function HomeChatBox() {
     setPendingFiles(files)
     setPendingPrompt(prompt)
     
-    // Seamlessly navigate to Chat view
-    window.scrollTo({ top: 0, behavior: "smooth" })
-    
-    // Find and click the chat tab
-    const chatTab = document.querySelector('[data-nav="chat"]') as HTMLElement | null
-    if (chatTab) {
-      // Trigger click to switch to chat view
-      chatTab.click()
-    }
+    // Seamlessly navigate to Chat view (client-side to preserve context)
+    try {
+      window.scrollTo({ top: 0, behavior: "smooth" })
+    } catch {}
+    router.push('/?view=chat')
   }
 
   return (
