@@ -1,7 +1,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle } from "lucide-react"
+import { ImageIcon, Folder, BookOpen, Home, Crown, User, Settings, UserCircle, HelpCircle, Menu, X } from "lucide-react"
 import { useState, useEffect, useRef } from "react"
 import { useSession } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
@@ -11,6 +11,7 @@ type ViewType = "home" | "studio" | "gallery" | "premium" | "chat"
 
 export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewType; onNavChange?: (v: ViewType) => void }) {
   const [showAccountDropdown, setShowAccountDropdown] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { data: session, status } = useSession()
   const isAuthed = status === 'authenticated'
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -27,6 +28,19 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+  // Lock body scroll when mobile menu is open
+  useEffect(() => {
+    try {
+      if (mobileMenuOpen) {
+        document.body.style.overflow = 'hidden'
+      } else {
+        document.body.style.overflow = ''
+      }
+    } catch {}
+    return () => {
+      try { document.body.style.overflow = '' } catch {}
+    }
+  }, [mobileMenuOpen])
   const goto = (view: ViewType) => {
     if (onNavChange) onNavChange(view)
     else window.location.href = `/?view=${view}`
@@ -44,7 +58,7 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             aria-label="Go to Home"
             title="Madworks AI - Home"
           >
-            <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <Image
                 src="/mwlg2.png"
                 alt="Madworks logo"
@@ -53,11 +67,12 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
                 className="h-9 sm:h-10 md:h-12 w-auto object-contain"
                 priority
               />
-              <span className="text-2xl md:text-3xl font-bold text-white select-none">Madworks AI</span>
+              <span className="hidden sm:inline text-2xl md:text-3xl font-bold text-white select-none truncate">Madworks AI</span>
             </div>
           </div>
 
-          <div className="flex-1 min-w-0 flex justify-start sm:justify-center overflow-x-auto scrollbar-none -mx-2 px-2">
+          {/* Desktop / Tablet nav */}
+          <div className="hidden md:flex flex-1 min-w-0 justify-center -mx-2 px-2">
             <nav className="flex items-center gap-2 whitespace-nowrap">
               <div className="flex items-center gap-2">
                 <Button
@@ -116,9 +131,18 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
             {/* Right cluster: Upgrade, User avatar */}
             <Button
               onClick={() => (window.location.href = "/upgrade")}
-              className="h-9 md:h-11 lg:h-12 px-4 md:px-5 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black text-sm md:text-base shadow-lg shadow-yellow-500/25 backdrop-blur-sm ring-1 ring-white/10"
+              className="hidden md:inline-flex h-9 md:h-11 lg:h-12 px-4 md:px-5 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 hover:from-yellow-500 hover:via-amber-500 hover:to-amber-700 text-black text-sm md:text-base shadow-lg shadow-yellow-500/25 backdrop-blur-sm ring-1 ring-white/10"
             >
               <Crown className="w-4 h-4 mr-2" /> Upgrade
+            </Button>
+            {/* Mobile menu button */}
+            <Button
+              size="icon"
+              className="md:hidden h-9 w-9 p-0 rounded-xl bg-zinc-900/60 hover:bg-zinc-900/70 text-white border border-zinc-700"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Open menu"
+            >
+              <Menu className="w-5 h-5" />
             </Button>
             <div className="relative" ref={dropdownRef}>
               <Button
@@ -212,6 +236,52 @@ export function SiteHeader({ currentView, onNavChange }: { currentView?: ViewTyp
           </div>
         </div>
       </div>
+
+      {/* Mobile full-screen menu overlay */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm" onClick={() => setMobileMenuOpen(false)}>
+          {/* subtle gradient wash */}
+          <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(80%_60%_at_50%_0%,rgba(99,102,241,0.12),transparent_60%)]" />
+          <div
+            className="absolute inset-0"
+            style={{ paddingTop: 'env(safe-area-inset-top, 12px)', paddingBottom: 'env(safe-area-inset-bottom, 12px)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-col h-full">
+              <div className="flex items-center justify-between px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <Image src="/mwlg2.png" alt="Madworks logo" width={120} height={40} className="h-8 w-auto" />
+                  <span className="text-xl font-bold">Madworks AI</span>
+                </div>
+                <Button size="icon" className="h-9 w-9 p-0 rounded-xl bg-zinc-900/60 border border-zinc-700" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)}>
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+
+              <nav className="mt-1 px-4 space-y-2 overflow-y-auto pb-8">
+                <Button onClick={() => { setMobileMenuOpen(false); goto('home') }} className={`w-full h-12 rounded-xl justify-start bg-zinc-900/60 border-zinc-800 ${selectedView==='home' ? 'ring-1 ring-white/20' : ''}`}>
+                  <Home className="w-5 h-5 mr-3" /> Home
+                </Button>
+                <Button onClick={() => { setMobileMenuOpen(false); goto('chat') }} className={`w-full h-12 rounded-xl justify-start bg-zinc-900/60 border-zinc-800 ${selectedView==='chat' ? 'ring-1 ring-white/20' : ''}`}>
+                  <BookOpen className="w-5 h-5 mr-3" /> Create
+                </Button>
+                <Button onClick={() => { setMobileMenuOpen(false); goto('studio') }} className={`w-full h-12 rounded-xl justify-start bg-zinc-900/60 border-zinc-800 ${selectedView==='studio' ? 'ring-1 ring-white/20' : ''}`}>
+                  <Folder className="w-5 h-5 mr-3" /> Studio
+                </Button>
+                <Button onClick={() => { setMobileMenuOpen(false); goto('gallery') }} className={`w-full h-12 rounded-xl justify-start bg-zinc-900/60 border-zinc-800 ${selectedView==='gallery' ? 'ring-1 ring-white/20' : ''}`}>
+                  <BookOpen className="w-5 h-5 mr-3" /> Premium Templates
+                </Button>
+
+                <div className="pt-4">
+                  <Button onClick={() => { setMobileMenuOpen(false); window.location.href='/upgrade' }} className="w-full h-12 rounded-xl bg-gradient-to-r from-yellow-400 via-yellow-500 to-amber-600 text-black">
+                    <Crown className="w-5 h-5 mr-3" /> Upgrade
+                  </Button>
+                </div>
+              </nav>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

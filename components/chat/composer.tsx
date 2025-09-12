@@ -103,7 +103,7 @@ export function Composer({
   }
 
   return (
-    <div className={cn("w-full max-w-4xl mx-auto px-4 pb-6 pt-2", className)}>
+    <div className={cn("w-full max-w-4xl mx-auto px-4 pb-6 pt-2", className)} style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1.25rem)' }}>
       {attachments.length > 0 && (
         <div className="mb-3 flex flex-wrap gap-2">
           {attachments.map(attachment => (
