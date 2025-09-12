@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { useApp } from "./app-context"
 import { PlusCircle, Send, ImageIcon } from "lucide-react"
@@ -10,6 +10,7 @@ export function HomeChatBox() {
   const { setPendingPrompt, setPendingFiles } = useApp()
   const [prompt, setPrompt] = useState("")
   const [files, setFiles] = useState<File[]>([])
+  const [previews, setPreviews] = useState<string[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const router = useRouter()
 
@@ -17,6 +18,19 @@ export function HomeChatBox() {
     const imgs = Array.from(incoming).filter((f) => f.type.startsWith("image/"))
     setFiles(imgs)
   }
+
+  // Create and clean up object URLs for previews
+  useEffect(() => {
+    try {
+      const urls = files.map((f) => URL.createObjectURL(f))
+      setPreviews(urls)
+      return () => {
+        urls.forEach((u) => {
+          try { URL.revokeObjectURL(u) } catch {}
+        })
+      }
+    } catch { setPreviews([]) }
+  }, [files])
 
   const handleSubmit = async () => {
     if (files.length === 0) {
@@ -66,11 +80,12 @@ export function HomeChatBox() {
         multiple
         onChange={(e) => e.target.files && onFiles(e.target.files)}
       />
-      {files.length > 0 && (
+      {previews.length > 0 && (
         <div className="mt-3 flex gap-3 overflow-x-auto">
-          {files.map((f, i) => (
-            <div key={i} className="w-20 h-20 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 text-xs">
-              <ImageIcon className="w-4 h-4 mr-1" /> {f.name.slice(0, 8)}
+          {previews.map((src, i) => (
+            <div key={src} className="w-20 h-20 rounded-xl bg-zinc-900 border border-zinc-800 overflow-hidden flex-shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt={files[i]?.name || `upload-${i+1}`} className="w-full h-full object-cover" />
             </div>
           ))}
         </div>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -62,31 +62,27 @@ function uid(prefix = "el"): string {
 
 function clamp(n: number, min: number, max: number) { return Math.max(min, Math.min(max, n)) }
 
-function usePointerDrag(onMove: (dx: number, dy: number, e: PointerEvent) => void, onEnd?: () => void) {
-  const moveRef = useRef(onMove)
-  const endRef = useRef(onEnd)
-  moveRef.current = onMove
-  endRef.current = onEnd
-
-  return useCallback((e: React.PointerEvent) => {
+// Plain utility (NOT a hook) to attach pointer drag listeners
+function pointerDrag(onMove: (dx: number, dy: number, e: PointerEvent) => void, onEnd?: () => void) {
+  return (e: React.PointerEvent) => {
     const startX = e.clientX
     const startY = e.clientY
     const target = e.currentTarget as HTMLElement
-    target.setPointerCapture(e.pointerId)
+    try { target.setPointerCapture(e.pointerId) } catch {}
 
     function onPointerMove(ev: PointerEvent) {
-      moveRef.current?.(ev.clientX - startX, ev.clientY - startY, ev)
+      try { onMove(ev.clientX - startX, ev.clientY - startY, ev) } catch {}
     }
     function onPointerUp() {
-      try { target.releasePointerCapture(e.pointerId) } catch {}
+      try { target.releasePointerCapture((e as any).pointerId) } catch {}
       window.removeEventListener("pointermove", onPointerMove)
       window.removeEventListener("pointerup", onPointerUp)
-      endRef.current?.()
+      try { onEnd && onEnd() } catch {}
     }
 
     window.addEventListener("pointermove", onPointerMove)
     window.addEventListener("pointerup", onPointerUp)
-  }, [])
+  }
 }
 
 function useConversationsImages() {
@@ -348,7 +344,7 @@ export function EditorView() {
   }, [selected])
 
   // Drag logic
-  const startDrag = (id: string) => usePointerDrag((dx, dy) => {
+  const startDrag = (id: string) => pointerDrag((dx, dy) => {
     const s = scale || 1
     const ddx = dx / s
     const ddy = dy / s
@@ -356,7 +352,7 @@ export function EditorView() {
   })
 
   type Corner = 'nw' | 'ne' | 'sw' | 'se'
-  const startResize = (id: string, corner: Corner) => usePointerDrag((dx, dy) => {
+  const startResize = (id: string, corner: Corner) => pointerDrag((dx, dy) => {
     const s = scale || 1
     const ddx = dx / s
     const ddy = dy / s
