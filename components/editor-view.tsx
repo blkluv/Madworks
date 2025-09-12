@@ -65,6 +65,7 @@ function clamp(n: number, min: number, max: number) { return Math.max(min, Math.
 // Plain utility (NOT a hook) to attach pointer drag listeners
 function pointerDrag(onMove: (dx: number, dy: number, e: PointerEvent) => void, onEnd?: () => void) {
   return (e: React.PointerEvent) => {
+    try { e.preventDefault() } catch {}
     const startX = e.clientX
     const startY = e.clientY
     const target = e.currentTarget as HTMLElement
@@ -263,7 +264,20 @@ export function EditorView() {
   const onUploadFile = (file: File) => {
     const url = URL.createObjectURL(file)
     setUploads((u) => [url, ...u])
-    addImage(url)
+    if (file.type === 'image/svg+xml') {
+      // Import as editable layers
+      ;(async () => {
+        try {
+          const text = await file.text()
+          await importSvgText(text)
+        } catch {
+          // Fallback to plain image layer
+          addImage(url)
+        }
+      })()
+    } else {
+      addImage(url)
+    }
   }
 
   // Bring forward/back
@@ -367,6 +381,148 @@ export function EditorView() {
       return { ...e, x, y, width, height }
     }))
   })
+
+  // SVG import helpers to enable editing text layers from SVG outputs
+  const isSvgUrl = (u: string) => {
+    try {
+      const s = (u || '').toLowerCase()
+      return s.startsWith('data:image/svg+xml') || /\.svg(\?|#|$)/.test(s)
+    } catch { return false }
+  }
+
+  const parseStyleVal = (style: string | null | undefined, prop: string): string | null => {
+    if (!style) return null
+    try {
+      const re = new RegExp(`${prop}\\s*:\\s*([^;]+)`, 'i')
+      const m = style.match(re)
+      return m ? m[1].trim() : null
+    } catch { return null }
+  }
+
+  // Parse minimal transform translate/matrix into {tx, ty}
+  function parseTransform(t: string | null | undefined): { tx: number; ty: number } {
+    try {
+      const s = (t || '').trim()
+      if (!s) return { tx: 0, ty: 0 }
+      const tr = /translate\(\s*([-+]?\d*\.?\d+)(?:[ ,]+([-+]?\d*\.?\d+))?\s*\)/i.exec(s)
+      if (tr) {
+        const tx = parseFloat(tr[1] || '0') || 0
+        const ty = parseFloat(tr[2] || '0') || 0
+        return { tx, ty }
+      }
+      const mr = /matrix\(\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*,\s*([-+]?\d*\.?\d+)\s*\)/i.exec(s)
+      if (mr) {
+        const e = parseFloat(mr[5] || '0') || 0
+        const f = parseFloat(mr[6] || '0') || 0
+        return { tx: e, ty: f }
+      }
+      return { tx: 0, ty: 0 }
+    } catch { return { tx: 0, ty: 0 } }
+  }
+
+  async function importSvgFromUrl(url: string) {
+    try {
+      let text: string | null = null
+      if ((url || '').startsWith('data:image/svg+xml')) {
+        try {
+          const comma = url.indexOf(',')
+          const raw = comma >= 0 ? url.slice(comma + 1) : ''
+          text = decodeURIComponent(raw)
+        } catch {}
+      }
+      if (!text) {
+        const res = await fetch(url, { cache: 'no-store' })
+        if (!res.ok) throw new Error('fetch failed')
+        text = await res.text()
+      }
+      await importSvgText(text)
+    } catch {
+      // Fallback to simple image layer on any failure
+      await addImage(url)
+    }
+  }
+
+  async function importSvgText(svgText: string) {
+    try {
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(svgText, 'image/svg+xml')
+      const svg = doc.querySelector('svg')
+      if (!svg) throw new Error('no svg root')
+
+      // Determine intrinsic size
+      let vbw = 1000, vbh = 1000
+      const vb = svg.getAttribute('viewBox') || svg.getAttribute('viewbox')
+      if (vb) {
+        const parts = vb.split(/\s+/).map(Number)
+        if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
+          vbw = parts[2] || vbw
+          vbh = parts[3] || vbh
+        }
+      } else {
+        const wAttr = svg.getAttribute('width')
+        const hAttr = svg.getAttribute('height')
+        const wNum = wAttr ? parseFloat(wAttr) : NaN
+        const hNum = hAttr ? parseFloat(hAttr) : NaN
+        if (Number.isFinite(wNum) && Number.isFinite(hNum)) { vbw = wNum; vbh = hNum }
+      }
+      vbw = vbw || 1000
+      vbh = vbh || 1000
+      const sx = canvasPx.w / vbw
+      const sy = canvasPx.h / vbh
+      const sAvg = (sx + sy) / 2
+
+      // Background layer: original SVG as image filling the canvas
+      try {
+        const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText)
+        const bg: ImageEl = { id: uid('bg'), kind: 'image', url: dataUrl, x: 0, y: 0, width: canvasPx.w, height: canvasPx.h }
+        setElements((prev) => [...prev, bg])
+      } catch {}
+
+      // Extract text nodes as editable layers
+      const texts = Array.from(doc.querySelectorAll('text'))
+      for (const t of texts) {
+        const content = (t.textContent || '').trim()
+        if (!content) continue
+        const xAttr = t.getAttribute('x') || '0'
+        const yAttr = t.getAttribute('y') || '0'
+        const x = parseFloat(xAttr)
+        const y = parseFloat(yAttr)
+        const style = t.getAttribute('style') || ''
+        const { tx, ty } = parseTransform(t.getAttribute('transform'))
+        const fill = t.getAttribute('fill') || parseStyleVal(style, 'fill') || '#ffffff'
+        const ff = t.getAttribute('font-family') || parseStyleVal(style, 'font-family') || 'Inter, ui-sans-serif, system-ui'
+        const fwStr = t.getAttribute('font-weight') || parseStyleVal(style, 'font-weight') || '700'
+        const fw = (parseInt(fwStr) || 700) as 300|400|500|600|700|800|900
+        const fsStr = t.getAttribute('font-size') || parseStyleVal(style, 'font-size') || '32'
+        const fsNum = parseFloat(fsStr)
+        const anchor = (t.getAttribute('text-anchor') || parseStyleVal(style, 'text-anchor') || 'start').toLowerCase()
+        const align: 'left'|'center'|'right' = anchor === 'middle' ? 'center' : anchor === 'end' ? 'right' : 'left'
+
+        // Map to canvas coords and reasonable box
+        const cx = Math.round((x + tx) * sx)
+        const cy = Math.round((y + ty) * sy)
+        const fontSize = Math.max(10, Math.round((Number.isFinite(fsNum) ? fsNum : 32) * sAvg))
+        const el: TextEl = {
+          id: uid('text'),
+          kind: 'text',
+          x: Math.max(0, Math.min(canvasPx.w - 100, cx)),
+          y: Math.max(0, Math.min(canvasPx.h - 40, cy)),
+          width: Math.round(canvasPx.w * 0.7),
+          height: Math.round(fontSize * 3.2),
+          text: content,
+          fontSize,
+          fontFamily: ff,
+          fontWeight: fw,
+          color: String(fill),
+          align,
+        }
+        setElements((prev) => [...prev, el])
+        setSelectedId(el.id)
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }
 
   // Inspector updates
   const updateText = (patch: Partial<TextEl>) => {
@@ -522,7 +678,7 @@ export function EditorView() {
                   <div className="col-span-2 text-xs text-zinc-500">No images found.</div>
                 )}
                 {imagesFromChats.filter(u => !assetQuery || u.toLowerCase().includes(assetQuery.toLowerCase())).map((u) => (
-                  <button key={u} onClick={() => addImage(u)} className="group relative border border-zinc-900 rounded-lg overflow-hidden">
+                  <button key={u} onClick={() => (isSvgUrl(u) ? importSvgFromUrl(u) : addImage(u))} className="group relative border border-zinc-900 rounded-lg overflow-hidden">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={u} alt="asset" className="w-full h-24 object-cover group-hover:opacity-90" />
                   </button>
@@ -546,7 +702,7 @@ export function EditorView() {
               )}
               <div className="grid grid-cols-2 gap-2">
                 {uploads.filter(u => !assetQuery || u.toLowerCase().includes(assetQuery.toLowerCase())).map((u) => (
-                  <button key={u} onClick={() => addImage(u)} className="group relative border border-zinc-900 rounded-lg overflow-hidden">
+                  <button key={u} onClick={() => (isSvgUrl(u) ? importSvgFromUrl(u) : addImage(u))} className="group relative border border-zinc-900 rounded-lg overflow-hidden">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={u} alt="upload" className="w-full h-24 object-cover group-hover:opacity-90" />
                   </button>
@@ -721,10 +877,19 @@ function ElementView({ el, selected, onSelect, onStartDrag, onStartResize, onCha
     >
       <div
         className={cn(
-          "w-full h-full cursor-move",
+          "w-full h-full cursor-move touch-none",
           selected ? "ring-2 ring-purple-500/70" : "ring-1 ring-zinc-700/60"
         )}
-        onPointerDown={(e) => { e.stopPropagation(); onStartDrag(e) }}
+        onPointerDown={(e) => {
+          e.stopPropagation()
+          // For text layers, allow normal text editing unless Alt is held
+          // Hold Alt to drag text layers from anywhere inside
+          // Images always drag from anywhere
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          if ((el as any).kind === 'text' && !e.altKey) return
+          onStartDrag(e)
+        }}
       >
         {el.kind === 'image' ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -747,6 +912,15 @@ function ElementView({ el, selected, onSelect, onStartDrag, onStartResize, onCha
         )}
       </div>
 
+      {/* Drag handle for precise movement (visible when selected) */}
+      {selected && (
+        <div
+          title="Drag"
+          className="absolute -top-2 -left-2 w-4 h-4 rounded-md bg-zinc-200 text-zinc-900 border border-zinc-700 shadow cursor-grab touch-none"
+          onPointerDown={(e) => { e.stopPropagation(); onStartDrag(e) }}
+        />
+      )}
+
       {/* Resize handles */}
       {selected && (
         <>
@@ -755,7 +929,7 @@ function ElementView({ el, selected, onSelect, onStartDrag, onStartResize, onCha
               key={c}
               onPointerDown={(e) => { e.stopPropagation(); onStartResize(el.id, c)(e) }}
               className={cn(
-                "absolute w-3 h-3 bg-white rounded-sm border border-zinc-800", 
+                "absolute w-3 h-3 bg-white rounded-sm border border-zinc-800 touch-none", 
                 c === 'nw' && "-left-1.5 -top-1.5 cursor-nwse-resize",
                 c === 'ne' && "-right-1.5 -top-1.5 cursor-nesw-resize",
                 c === 'sw' && "-left-1.5 -bottom-1.5 cursor-nesw-resize",

@@ -266,6 +266,7 @@ export function ChatView() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const autoRanRef = useRef(false)
+  const bypassValidationRef = useRef(false)
   const { setPendingPrompt, pendingPrompt, pendingFiles, setPendingFiles, decrementCredit } = useApp()
   const [conversations, setConversations] = useState<Conversation[]>([
     { 
@@ -416,8 +417,8 @@ export function ChatView() {
     e.preventDefault()
     const isFirst = (activeConv?.messages?.length || 0) === 0
     const wantsImage = mentionsImage(input)
-    // First message: require prompt, and require image, but give a helpful hint if missing
-    if (isFirst) {
+    // First message validation (skipped when bypassValidationRef is true, e.g., auto-run from Home)
+    if (isFirst && !bypassValidationRef.current) {
       if (!input.trim()) {
         updateActive((c) => ({
           ...c,
@@ -442,7 +443,7 @@ export function ChatView() {
         try { fileInputRef.current?.click() } catch {}
         return
       }
-    } else {
+    } else if (!isFirst) {
       // Subsequent messages require at least a prompt
       if (!input.trim()) return
       // If user references an image but there's none in this chat yet, prompt to attach
@@ -750,7 +751,12 @@ export function ChatView() {
     
     // Only send if we have both an image and a prompt
     if (firstFile && pendingPrompt) {
-      await handleSendMessage(new Event('submit') as any)
+      try {
+        bypassValidationRef.current = true
+        await handleSendMessage(new Event('submit') as any)
+      } finally {
+        bypassValidationRef.current = false
+      }
     }
     
     // Clear pending state
@@ -803,7 +809,7 @@ export function ChatView() {
                 <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 group-hover:opacity-10 blur-sm transition-opacity z-0"></div>
                 <button
                   onClick={() => setActiveId(c.id)}
-                  className={`relative z-10 w-full text-left px-4 py-2.5 text-sm rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/30 ${
+                  className={`relative z-10 w-full text-left px-3 py-2 text-sm rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/30 ${
                     activeId === c.id 
                       ? 'border-zinc-700/60 bg-zinc-900 hover:bg-zinc-900' 
                       : 'border-zinc-800 bg-black/40 hover:bg-black/50'
@@ -813,8 +819,28 @@ export function ChatView() {
                   {activeId === c.id && (
                     <span className="pointer-events-none absolute left-2 top-2 bottom-2 w-1 rounded-full bg-gradient-to-b from-zinc-400 via-zinc-500 to-zinc-600 opacity-70" />
                   )}
-                  <div className="truncate text-sm font-medium text-zinc-200 pl-1">{c.title || "Untitled"}</div>
-                  <div className="text-xs text-zinc-500 pl-1">{c.messages.length} messages</div>
+                  <div className="flex items-center gap-3">
+                    {/* Thumbnail */}
+                    <div className="h-10 w-10 rounded-lg border border-zinc-800 overflow-hidden bg-zinc-900/60 flex-shrink-0">
+                      {(() => {
+                        const msgs = c.messages || []
+                        let thumb: string | undefined = undefined
+                        for (let i = msgs.length - 1; i >= 0 && !thumb; i--) {
+                          const m = msgs[i]
+                          const a = (m.attachments || []).find((aa: any) => aa && aa.type === 'image') as any
+                          if (a && a.url) thumb = a.url
+                        }
+                        return thumb
+                          ? (<img src={thumb} alt="thumb" className="h-full w-full object-cover" />)
+                          : (<div className="h-full w-full grid place-items-center text-[10px] text-zinc-500">No preview</div>)
+                      })()}
+                    </div>
+                    {/* Title and meta */}
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-zinc-200">{c.title || 'Untitled'}</div>
+                      <div className="text-[11px] text-zinc-500">{c.messages.length} message{c.messages.length===1?'':'s'}</div>
+                    </div>
+                  </div>
                 </button>
               </div>
             </div>
