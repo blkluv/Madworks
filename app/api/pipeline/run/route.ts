@@ -363,7 +363,7 @@ export async function POST(req: Request) {
     logStep(logs, "copy", "error", "Failed to generate copy", undefined, Date.now() - t1, e);
   }
 
-  // Step 3 + 4: Compose and Render for a single aspect ratio
+  // Step 3 + 4: Compose and Render (strictly ONE output)
   // Prefer the original uploaded image dimensions when available to match input format exactly
   let sizesToUse: Array<{ name?: string; width: number; height: number }> = []
   try {
@@ -380,7 +380,7 @@ export async function POST(req: Request) {
   const combinedOutputs: any[] = []
   let combinedThumb: string | undefined = undefined
   try {
-    // Use the first size (original when available) and generate EXACTLY THREE fixed presets
+    // Use the first size (original when available) and generate exactly ONE variant
     const s = sizesToUse[0]
     const seedStr = `${job_id}|${s.name}|${s.width}x${s.height}`
     const seed = (variant_seed_override ?? hash32(seedStr))
@@ -388,123 +388,78 @@ export async function POST(req: Request) {
       ? copy.variants[0]
       : (copy?.headline ? { headline: copy.headline, subheadline: copy.subheadline, cta: copy.cta, emphasis_ranges: copy?.emphasis_ranges, font_recommendations: copy?.font_recommendations } : { headline: "", subheadline: "", cta: "Learn More" })
 
-    // Three consistent, user-friendly presets (no scrims/cards)
-    const presets: Array<{ id: string; name: string; variant: any }> = [
-      {
-        id: "center_bold",
-        name: "Centered · Bold",
-        variant: {
-          panel_side: "center",
-          text_align: "center",
-          vertical_align: "middle",
-          show_scrim: false,
-          panel_style: "none",
-          headline_fill: "solid",
-          type_scale: 1.1,
-          panel_width_factor: 0.92,
-          cta_style: "pill",
-          cta_width_mode: "auto",
-          bg_fit: "slice",
-          emotional_mode: "neutral",
-        },
-      },
-      {
-        id: "left_bold_vignette_bl",
-        name: "Left · Bold · BL Vignette",
-        variant: {
-          panel_side: "left",
-          text_align: "left",
-          vertical_align: "middle",
-          show_scrim: false,
-          panel_style: "none",
-          headline_fill: "solid",
-          type_scale: 1.08,
-          panel_width_factor: 0.52,
-          cta_style: "pill",
-          cta_width_mode: "auto",
-          bg_fit: "slice",
-          emotional_mode: "strong",
-          // Enable bold bottom-left vignette shadow
-          corner_shadow_bl: true,
-          corner_shadow_strength: 1.25,
-        },
-      },
-      {
-        id: "top_bold_white",
-        name: "Top · Bold White",
-        variant: {
-          panel_side: "center",
-          text_align: "center",
-          vertical_align: "top",
-          show_scrim: false,
-          panel_style: "none",
-          headline_fill: "solid",
-          type_scale: 1.02,
-          panel_width_factor: 0.90,
-          cta_style: "pill",
-          cta_width_mode: "auto",
-          bg_fit: "slice",
-          emotional_mode: "neutral",
-        },
-      },
-    ]
-
-    const comps: Array<any> = []
-    for (let i = 0; i < presets.length; i++) {
-      const p = presets[i]
-      const t2 = Date.now()
-      logStep(logs, `compose_${s.name}_${p.id}`, "start", `Composing ${p.name} for ${s.width}x${s.height}`)
-      const compPayload: any = {
-        copy: v0,
-        analysis: analysis || {},
-        crop_info: { width: s.width, height: s.height },
-        smart_layout: false,
-        variant: p.variant,
-        ...(text_color_override ? { text_color_override } : {}),
-      }
-      const comp = await fetchJson(
-        `${PIPELINE_URL}/compose`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(compPayload),
-        },
-        TIMEOUTS.compose,
-      )
-      comps.push({ ...comp, preset_id: p.id, preset_name: p.name, variant_used: p.variant })
-      if (!composition) composition = comp // capture one for backward compat
-      logStep(logs, `compose_${s.name}_${p.id}`, "ok", `Composed 1 variant`, undefined, Date.now() - t2)
+    const t2 = Date.now()
+    logStep(logs, `compose_${s.name}`, "start", `Composing 1 variant for ${s.width}x${s.height}`)
+    // Prefer a clean, minimalist base and let smart_layout choose the side
+    const baseVariant: any = {
+      text_align: "left",
+      vertical_align: "middle",
+      show_scrim: false,
+      panel_style: "none",
+      headline_fill: "solid",
+      type_scale: 1.06,
+      panel_width_factor: 0.52,
+      cta_style: "pill",
+      cta_width_mode: "auto",
+      bg_fit: "slice",
+      corner_shadow_bl: false,
+      line_gap_factor: 1.20,
+      sub_gap_factor: 1.12,
+      cta_gap_scale: 1.0,
+      badge_text: "",
+      panel_side: "left",
     }
+    // Force left column for normal ad layout
 
-    // Render each composed SVG (exactly three)
-    for (let i = 0; i < comps.length; i++) {
-      const comp = comps[i]
-      const label = comp?.preset_name || comp?.preset_id || `variant_${i + 1}`
-      const t3 = Date.now()
-      logStep(logs, `render_${s.name}_${label}`, "start", `Rendering ${s.width}x${s.height} for ${label}`)
-      const renderPayload = {
-        composition: comp,
-        crop_info: { width: s.width, height: s.height },
-        job_id,
-        force_svg: true,
-        analysis: analysis || {},
-        use_gpt_image: false,
-        copy: v0,
-      }
-      const r = await fetchJson(
-        `${PIPELINE_URL}/render`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(renderPayload),
-        },
-        TIMEOUTS.render,
-      )
-      const outs = (r?.outputs || []).map((o: any) => ({ ...o, variant: label, size: s.name }))
-      if (outs.length > 0) combinedOutputs.push(outs[0])
-      if (!combinedThumb) combinedThumb = r?.thumbnail_url
-      logStep(logs, `render_${s.name}_${label}`, "ok", "Rendered outputs", { outputs: outs.length }, Date.now() - t3)
+    const compPayload: any = {
+      copy: v0,
+      analysis: analysis || {},
+      crop_info: { width: s.width, height: s.height },
+      // Enable smart layout so GPT layout overrides can apply when USE_GPT_LAYOUT=true
+      smart_layout: true,
+      panel_side: "left",
+      // Provide a clean base variant with no scrim/card/vignette; GPT may override safely
+      variant: baseVariant,
+      variant_seed: seed,
+      ...(text_color_override ? { text_color_override } : { text_color_override: "#ffffff" }),
     }
+    const comp = await fetchJson(
+      `${PIPELINE_URL}/compose`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...compPayload, allow_overlays: false, minimal_style: true, soft_vignette_bl: true }),
+      },
+      TIMEOUTS.compose,
+    )
+    composition = comp
+    logStep(logs, `compose_${s.name}`, "ok", `Composed 1 variant`, undefined, Date.now() - t2)
+
+    const t3 = Date.now()
+    logStep(logs, `render_${s.name}`, "start", `Rendering ${s.width}x${s.height}`)
+    const renderPayload = {
+      composition: comp,
+      crop_info: { width: s.width, height: s.height },
+      job_id,
+      // honor per-request single-output SVG rendering when supported server-side
+      force_svg: true,
+      analysis: analysis || {},
+      use_gpt_image: false,
+      copy: v0,
+    }
+    const r = await fetchJson(
+      `${PIPELINE_URL}/render`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(renderPayload),
+      },
+      TIMEOUTS.render,
+    )
+    const outs = (r?.outputs || []).map((o: any) => ({ ...o, variant: s.name, size: s.name }))
+    if (outs.length > 0) combinedOutputs.push(outs[0])
+    if (!combinedThumb) combinedThumb = r?.thumbnail_url
+    logStep(logs, `render_${s.name}`, "ok", "Rendered outputs", { outputs: outs.length }, Date.now() - t3)
 
     renderRes = { outputs: combinedOutputs, thumbnail_url: combinedThumb }
   } catch (e) {

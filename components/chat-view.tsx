@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
-import { PlusCircle, Paperclip, Image as ImageIcon, Send, SlidersHorizontal } from "lucide-react"
+import { PlusCircle, Paperclip, Image as ImageIcon, Send, SlidersHorizontal, Trash2, Pencil, Pin } from "lucide-react"
 import { useApp } from "@/components/app-context"
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
 import { CreditsPill } from "@/components/credits-pill"
@@ -136,6 +136,7 @@ interface Conversation {
   createdAt: string
   updatedAt: string
   analysis?: any
+  pinned?: boolean
 }
 
 type PipelineResponse = {
@@ -293,6 +294,9 @@ export function ChatView() {
   const [copyList, setCopyList] = useState<Array<{ headline: string; subheadline: string; cta: string }>>([])
   const [showOptions, setShowOptions] = useState(false)
   const { data: session } = useSession()
+  const [searchQuery, setSearchQuery] = useState("")
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameTitle, setRenameTitle] = useState("")
 
   // Shuffle helper for suggestions
   function shuffle<T>(arr: T[]): T[] {
@@ -410,7 +414,35 @@ export function ChatView() {
   }
 
   const updateActive = (updater: (c: Conversation) => Conversation) => {
-    setConversations((prev) => prev.map((c) => (c.id === activeId ? updater(c) : c)))
+    const now = new Date().toISOString()
+    setConversations((prev) => prev.map((c) => (c.id === activeId ? { ...updater(c), updatedAt: now } : c)))
+  }
+
+  // Sidebar actions
+  const togglePin = (id: string) => {
+    setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, pinned: !c.pinned } : c)))
+  }
+  const beginRename = (id: string) => {
+    const conv = conversations.find((c) => c.id === id)
+    setRenamingId(id)
+    setRenameTitle(conv?.title || "")
+  }
+  const commitRename = () => {
+    if (!renamingId) return
+    const title = (renameTitle || "").trim() || "Untitled"
+    setConversations((prev) => prev.map((c) => (c.id === renamingId ? { ...c, title, updatedAt: new Date().toISOString() } : c)))
+    setRenamingId(null)
+    setRenameTitle("")
+  }
+  const cancelRename = () => { setRenamingId(null); setRenameTitle("") }
+  const deleteChat = (id: string) => {
+    setConversations((prev) => {
+      const next = prev.filter((c) => c.id !== id)
+      if (activeId === id) {
+        setActiveId(next[0]?.id || "c_default")
+      }
+      return next.length ? next : [{ id: "c_default", title: "New chat", messages: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]
+    })
   }
 
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -793,23 +825,49 @@ export function ChatView() {
     <div className={`h-full min-h-0 w-full bg-transparent overflow-visible flex ${hasPreview ? 'pt-0' : 'pt-4 md:pt-6'}`}>
       {/* Left: Conversations (hidden when a preview is present for a full-width ad view) */}
       {!hasPreview && (
-      <aside className="hidden md:flex w-[220px] lg:w-[260px] flex-col">
-        <div className="p-3">
+      <aside className="hidden md:flex w-[240px] lg:w-[300px] flex-col">
+        <div className="p-3 space-y-3">
+          {/* New chat */}
           <div className="relative group isolate">
             <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-10 group-hover:opacity-20 blur-sm transition-opacity z-0"></div>
-            <Button onClick={startNewChat} className="relative z-10 w-full h-16 rounded-2xl border border-zinc-800 bg-black/60 hover:bg-black/70 text-lg transition-all shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/40">
+            <Button onClick={startNewChat} className="relative z-10 w-full h-14 rounded-2xl border border-zinc-800 bg-black/60 hover:bg-black/70 text-base transition-all shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/40">
               <PlusCircle className="w-5 h-5 mr-2" /> New chat
             </Button>
           </div>
+          {/* Search */}
+          <div>
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search chats"
+              className="h-9 rounded-xl bg-zinc-900/70 border-zinc-800 text-sm"
+            />
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto sidebar-scrollbar">
-          {conversations.map((c) => (
+          {(() => {
+            const q = (searchQuery || "").toLowerCase()
+            const filtered = (conversations || []).filter((c) => {
+              if (!q) return true
+              const last = (c.messages || []).slice().reverse().find((m) => !!m.content)?.content || ""
+              return (c.title || "").toLowerCase().includes(q) || last.toLowerCase().includes(q)
+            })
+            const sorted = filtered.slice().sort((a, b) => {
+              const pa = a.pinned ? 1 : 0
+              const pb = b.pinned ? 1 : 0
+              if (pa !== pb) return pb - pa
+              return (new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+            })
+            return sorted.map((c) => (
             <div key={c.id} className="px-3 py-1">
               <div className="relative group isolate">
                 <div className="pointer-events-none absolute -inset-[2px] rounded-2xl bg-[conic-gradient(at_0%_0%,#6366f1_0deg,#ec4899_120deg,#f59e0b_240deg,#6366f1_360deg)] opacity-5 group-hover:opacity-10 blur-sm transition-opacity z-0"></div>
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setActiveId(c.id)}
-                  className={`relative z-10 w-full text-left px-3 py-2 text-sm rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/30 ${
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveId(c.id) } }}
+                  className={`relative z-10 w-full text-left px-3 py-2.5 text-sm rounded-xl border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/30 ${
                     activeId === c.id 
                       ? 'border-zinc-700/60 bg-zinc-900 hover:bg-zinc-900' 
                       : 'border-zinc-800 bg-black/40 hover:bg-black/50'
@@ -835,16 +893,48 @@ export function ChatView() {
                           : (<div className="h-full w-full grid place-items-center text-[10px] text-zinc-500">No preview</div>)
                       })()}
                     </div>
-                    {/* Title and meta */}
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-zinc-200">{c.title || 'Untitled'}</div>
-                      <div className="text-[11px] text-zinc-500">{c.messages.length} message{c.messages.length===1?'':'s'}</div>
+                    {/* Title + snippet */}
+                    <div className="min-w-0 flex-1">
+                      {renamingId === c.id ? (
+                        <Input
+                          autoFocus
+                          value={renameTitle}
+                          onChange={(e) => setRenameTitle(e.target.value)}
+                          onBlur={commitRename}
+                          onKeyDown={(e) => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') cancelRename() }}
+                          className="h-8 rounded-md bg-zinc-900/70 border-zinc-800 text-sm"
+                        />
+                      ) : (
+                        <div className="truncate text-sm font-medium text-zinc-200 flex items-center gap-2">
+                          {c.title || 'Untitled'}
+                          {c.pinned && <Pin className="w-3.5 h-3.5 text-zinc-400" />}
+                        </div>
+                      )}
+                      <div className="text-[11px] text-zinc-500 truncate">
+                        {(() => {
+                          const last = (c.messages || []).slice().reverse().find((m) => !!m.content)?.content || ''
+                          return last || `${c.messages.length} message${c.messages.length===1?'':'s'}`
+                        })()}
+                      </div>
+                    </div>
+                    {/* Actions (hover) */}
+                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 flex items-center gap-1">
+                      <Button size="icon" variant="ghost" className="h-7 w-7" title={c.pinned?"Unpin":"Pin"} onClick={(e)=>{e.preventDefault(); togglePin(c.id)}}>
+                        <Pin className="w-4 h-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-7 w-7" title="Rename" onClick={(e)=>{e.preventDefault(); beginRename(c.id)}}>
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button size="icon" variant="ghost" className="h-7 w-7" title="Delete" onClick={(e)=>{e.preventDefault(); deleteChat(c.id)}}>
+                        <Trash2 className="w-4 h-4 text-red-400" />
+                      </Button>
                     </div>
                   </div>
-                </button>
+                </div>
               </div>
             </div>
-          ))}
+            ))
+          })()}
         </div>
       </aside>
       )}

@@ -526,7 +526,7 @@ def _sanitize_layout_variant(raw: Dict[str, Any], palette: List[str]) -> Dict[st
         if not isinstance(raw, dict):
             return {}
         out: Dict[str, Any] = {}
-        allowed_styles = {"fill", "outline", "pill"}
+        allowed_styles = {"fill", "outline", "pill", "text"}
         allowed_width_modes = {"auto", "wide"}
         allowed_panel_side = {"left", "right", "center"}
         allowed_text_align = {"left", "center", "right"}
@@ -1912,7 +1912,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
         <!-- Background -->
         {% if original_url %}
-        <image xlink:href="{{ original_url | e }}" x="0" y="0" width="{{ width }}" height="{{ height }}" preserveAspectRatio="{{ preserve_mode }}" filter="url(#imgFilter)"/>
+        <image xlink:href="{{ original_url | e }}" x="0" y="0" width="{{ width }}" height="{{ height }}" preserveAspectRatio="{{ preserve_mode }}" {% if enable_img_filter %}filter="url(#imgFilter)"{% endif %}/>
         {% if show_scrim %}
         <!-- Optional legibility gradient overlay -->
         <rect width="100%" height="100%" fill="url(#shade)" />
@@ -1948,7 +1948,7 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
 
             {% if badge_text %}
             <!-- Optional badge/ribbon -->
-            <g filter="url(#shadow)">
+            <g {% if enable_badge_shadow %}filter="url(#shadow)"{% endif %}>
                 <rect x="{{ badge_x }}" y="{{ badge_y }}" width="{{ badge_w }}" height="{{ badge_h }}" rx="8" fill="{{ badge_color }}" />
                 <text x="{{ badge_x + badge_w/2 }}" y="{{ badge_y + badge_h*0.68 }}" font-family="{{ font_family_headline | e }}" font-size="{{ int(sub_size*0.85) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ badge_text | e }}</text>
             </g>
@@ -1975,14 +1975,22 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
                 {% endfor %}
             </text>
 
-            <!-- CTA Button centered within text panel -->
-            <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="{{ cta_radius }}" fill="{{ cta_fill }}" filter="url(#shadow)" stroke="{{ cta_stroke }}" stroke-opacity="{{ cta_stroke_opacity }}"/>
+            <!-- CTA: text-only when cta_style == 'text', else minimal button -->
+            {% if cta_style == 'text' %}
+            <text x="{{ cta_x }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline | e }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="{{ text_color }}" text-anchor="start">{{ cta | e }}</text>
+            {% else %}
+            <rect x="{{ cta_x }}" y="{{ cta_y }}" width="{{ cta_width }}" height="{{ cta_height }}" rx="{{ cta_radius }}" fill="{{ cta_fill }}" {% if enable_cta_shadow %}filter="url(#shadow)"{% endif %} stroke="{{ cta_stroke }}" stroke-opacity="{{ cta_stroke_opacity }}"/>
             <text x="{{ cta_x + (cta_width/2) }}" y="{{ cta_text_y }}" font-family="{{ font_family_headline | e }}" font-size="{{ int(sub_size*0.9) }}" font-weight="800" fill="#ffffff" text-anchor="middle">{{ cta | upper | e }}</text>
+            {% endif %}
         </g>
     </svg>
     """
 
     template = Template(svg_template)
+    # Strictly disable visual filters/shadows by default
+    enable_img_filter = False
+    enable_cta_shadow = False
+    enable_badge_shadow = False
     img_href = _resolve_img_href(analysis)
     try:
         logger.info(
@@ -2054,6 +2062,10 @@ def create_svg_composition(copy_data: Dict[str, Any], analysis: Dict[str, Any], 
         cta_fill=cta_fill,
         cta_stroke=cta_stroke,
         cta_stroke_opacity=cta_stroke_opacity,
+        # Filter enables
+        enable_img_filter=enable_img_filter,
+        enable_cta_shadow=enable_cta_shadow,
+        enable_badge_shadow=enable_badge_shadow,
         # Enhanced text styling
         headline_fill=headline_fill,
         headline_stroke_w=headline_stroke_w,
@@ -2796,13 +2808,44 @@ async def compose(payload: Dict[str, Any]):
                 pass
         # Optionally ask GPT for layout overrides (cached) and merge them
         gpt_variant: Dict[str, Any] = {}
-        if USE_GPT_LAYOUT:
+        minimal_style = bool(payload.get("minimal_style", False))
+        if USE_GPT_LAYOUT and not minimal_style:
             try:
                 gpt_variant = await get_gpt_layout_variant_cached(copy_data, analysis, crop_info, base_variant=variant)
             except Exception as _e:
                 logger.warning(f"GPT layout generation skipped in /compose: {_e}")
         if gpt_variant:
             variant = {**variant, **gpt_variant}
+        # Hard-disable overlays unless explicitly allowed by the caller.
+        # This prevents dark boxes/scrims/panel cards from being introduced by GPT overrides.
+        allow_overlays = bool(payload.get("allow_overlays", False))
+        if not allow_overlays:
+            try:
+                variant["show_scrim"] = False
+                variant["panel_style"] = "none"
+                variant["corner_shadow_bl"] = False
+                # Remove overlay intensity knobs if present
+                for k in ("corner_shadow_strength", "shade_factor", "side_shade_factor"):
+                    if k in variant:
+                        del variant[k]
+                # Favor solid headline fill by default
+                if not isinstance(variant.get("headline_fill"), str):
+                    variant["headline_fill"] = "solid"
+                # Force CTA to text-only in minimal mode
+                if minimal_style:
+                    variant["cta_style"] = "text"
+            except Exception:
+                pass
+        # Permit a very soft bottom-left vignette if requested (not a heavy overlay)
+        try:
+            soft_v = payload.get("soft_vignette_bl")
+            if soft_v is None:
+                soft_v = False  # default OFF per user request for no filters
+            if bool(soft_v):
+                variant["corner_shadow_bl"] = True
+                variant["corner_shadow_strength"] = 0.12  # very subtle
+        except Exception:
+            pass
         svg_content = create_svg_composition(
             copy_data,
             analysis,
